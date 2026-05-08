@@ -213,6 +213,36 @@ export type SlackAccountConfig = {
   ackReaction?: string;
   /** Reaction emoji added while processing a reply (e.g. "hourglass_flowing_sand"). Removed when done. Useful as a typing indicator fallback when assistant mode is not enabled. */
   typingReaction?: string;
+  /**
+   * Enable/disable the Slack missed-events reconcile sweep (on-reconnect +
+   * periodic). Default when the feature ships upstream: true. Retires
+   * part of runtime patch 007 (see PRE-175 C fork-patch retirement).
+   *
+   * NOTE: The underlying `runSlackReconcile` feature is being upstreamed
+   * in a separate PR. Until that lands this value is accepted by config
+   * validation but has no runtime effect yet.
+   */
+  reconcileMissedEvents?: boolean;
+  /**
+   * Interval in milliseconds for the Slack missed-events reconcile sweep.
+   *
+   * Slack Socket Mode can silently drop `app_mention` / `message` events
+   * without any socket-level error. The reconcile sweep uses
+   * `conversations.history` to backfill allowlisted channels on a timer,
+   * independent of socket reconnect events.
+   *
+   * Default when the feature ships upstream: 120000 (2 min). Minimum
+   * enforced: 15000 (15s). Set to 0 to disable the periodic sweep
+   * (reconcile still runs on reconnect when enabled via
+   * `reconcileMissedEvents`).
+   *
+   * Retires runtime patch 011 (see PRE-175 C fork-patch retirement).
+   *
+   * NOTE: The underlying `runSlackReconcile` feature is being upstreamed
+   * in a separate PR. Until that lands this value is accepted by config
+   * validation but has no runtime effect yet.
+   */
+  reconcilePeriodicMs?: number;
 };
 
 export type SlackConfig = {

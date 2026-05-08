@@ -1041,6 +1041,14 @@ export const SlackAccountSchema = z
     responsePrefix: z.string().optional(),
     ackReaction: z.string().optional(),
     typingReaction: z.string().optional(),
+    // Retires runtime patches 007/011 (PRE-175 C). See SlackAccountConfig
+    // reconcileMissedEvents / reconcilePeriodicMs. The underlying reconcile
+    // loop lands in a separate upstream PR; these config surfaces accept
+    // the values today so operator config doesn't need a migration.
+    reconcileMissedEvents: z.boolean().optional(),
+    reconcilePeriodicMs: z
+      .union([z.literal(0), z.number().int().min(15_000)])
+      .optional(),
   })
   .strict()
   .superRefine(() => {
