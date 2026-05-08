@@ -19,3 +19,15 @@ export type {
   StateStoreWatchCallback,
   StateStoreWriteOptions,
 } from "./state-store.js";
+
+export {
+  DEFAULT_THREAD_PARTICIPATION_TTL_MS,
+  THREAD_PARTICIPATION_NAMESPACE,
+  createThreadParticipationStore,
+} from "./thread-participation-store.js";
+export type {
+  MarkActiveInput,
+  ThreadParticipationRecord,
+  ThreadParticipationStore,
+  ThreadParticipationStoreOptions,
+} from "./thread-participation-store.js";
