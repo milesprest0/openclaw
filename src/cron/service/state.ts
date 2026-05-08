@@ -136,6 +136,13 @@ export type CronServiceState = {
   warnedMissingSessionTargetJobIds: Set<string>;
   storeLoadedAtMs: number | null;
   storeFileMtimeMs: number | null;
+  /**
+   * PRE-176: debounced fs.watch handle on the cron store file.
+   * Populated by `start()` after the first successful store persist so
+   * external edits (Prest0n, seed scripts, `jq` edits) hot-reload without
+   * a gateway restart. `null` when cron is disabled or watch failed.
+   */
+  fileWatcher: { stop: () => void; suppressFor: (ms?: number) => void } | null;
 };
 
 export function createCronServiceState(deps: CronServiceDeps): CronServiceState {
@@ -149,6 +156,7 @@ export function createCronServiceState(deps: CronServiceDeps): CronServiceState 
     warnedMissingSessionTargetJobIds: new Set<string>(),
     storeLoadedAtMs: null,
     storeFileMtimeMs: null,
+    fileWatcher: null,
   };
 }
 

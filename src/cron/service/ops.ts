@@ -203,10 +203,31 @@ export async function start(state: CronServiceState) {
       "cron: started",
     );
   });
+
+  // PRE-176: start the debounced file-watcher AFTER the initial load so
+  // external edits to jobs.json hot-reload without a gateway restart.
+  // Lazy-imported to avoid a top-of-file cycle with store.ts.
+  try {
+    const { startCronStoreWatcher } = await import("./file-watcher.js");
+    state.fileWatcher = startCronStoreWatcher(state);
+  } catch (err) {
+    state.deps.log.warn(
+      { err: String(err) },
+      "cron: failed to start jobs.json file watcher (hot-reload disabled)",
+    );
+  }
 }
 
 export function stop(state: CronServiceState) {
   stopTimer(state);
+  if (state.fileWatcher) {
+    try {
+      state.fileWatcher.stop();
+    } catch {
+      /* noop */
+    }
+    state.fileWatcher = null;
+  }
 }
 
 export async function status(state: CronServiceState) {
