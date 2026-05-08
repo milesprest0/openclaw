@@ -19,3 +19,14 @@ export type {
   StateStoreWatchCallback,
   StateStoreWriteOptions,
 } from "./state-store.js";
+
+export {
+  CHANNEL_ROUTING_NAMESPACE,
+  createChannelRoutingStore,
+} from "./channel-routing-store.js";
+export type {
+  ChannelRoutingRecord,
+  ChannelRoutingStore,
+  ChannelRoutingStoreOptions,
+  UpsertChannelRoutingInput,
+} from "./channel-routing-store.js";
