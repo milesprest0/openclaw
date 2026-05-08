@@ -213,6 +213,21 @@ export type SlackAccountConfig = {
   ackReaction?: string;
   /** Reaction emoji added while processing a reply (e.g. "hourglass_flowing_sand"). Removed when done. Useful as a typing indicator fallback when assistant mode is not enabled. */
   typingReaction?: string;
+  /**
+   * TTL in milliseconds for the Slack socket-mode `app_mention` retry-dedup
+   * window. Slack emits both a `message` and a sibling `app_mention` event for
+   * every @mention (same `ts`). The handler dedupes them via a short-lived
+   * retry key. If an agent turn runs longer than this TTL, the sibling event
+   * arrives AFTER the retry key is pruned, falls into the `wasSeen +
+   * !consumeRetry` branch, and is silently dropped.
+   *
+   * Default: 900000 (15 min) — chosen to survive the longest realistic single
+   * turn. Minimum enforced: 60000 (60s). Memory stays bounded because the
+   * retry map is pruned on every access.
+   *
+   * Retires runtime patch 013 (see PRE-175 C fork-patch retirement).
+   */
+  appMentionRetryTtlMs?: number;
 };
 
 export type SlackConfig = {

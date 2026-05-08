@@ -1041,6 +1041,8 @@ export const SlackAccountSchema = z
     responsePrefix: z.string().optional(),
     ackReaction: z.string().optional(),
     typingReaction: z.string().optional(),
+    // Retires runtime patch 013 (PRE-175 C). See SlackAccountConfig.appMentionRetryTtlMs.
+    appMentionRetryTtlMs: z.number().int().min(60_000).optional(),
   })
   .strict()
   .superRefine(() => {
