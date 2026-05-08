@@ -27,7 +27,39 @@ export type SlackMessageHandler = (
   opts: { source: "message" | "app_mention"; wasMentioned?: boolean },
 ) => Promise<void>;
 
-const APP_MENTION_RETRY_TTL_MS = 60_000;
+// BUG-051 / PRE-175 C retirement of runtime patch 013.
+//
+// Slack socket-mode fires two events per @mention (a `message` and an
+// `app_mention` with the same ts). The handler dedupes them via a short-
+// lived retry key (appMentionRetryKeys). At 60s, under heavy agent turns
+// that commonly run 60-240s, the sibling app_mention arrives AFTER the
+// retry key has been pruned, falls into the wasSeen+!consumeRetry branch,
+// and is silently dropped before the ingress audit ever fires.
+//
+// New default is 15 minutes, which gives plenty of headroom for the longest
+// realistic single turn. Memory stays bounded because the map is pruned on
+// every access. Operators can override via
+// `channels.slack.appMentionRetryTtlMs` (or per-account).
+const DEFAULT_APP_MENTION_RETRY_TTL_MS = 900_000;
+const MIN_APP_MENTION_RETRY_TTL_MS = 60_000;
+
+function resolveAppMentionRetryTtlMs(cfg: SlackMonitorContext["cfg"], accountId: string): number {
+  const slackCfg = cfg.channels?.slack as
+    | { appMentionRetryTtlMs?: number; accounts?: Record<string, { appMentionRetryTtlMs?: number }> }
+    | undefined;
+  const perAccount = slackCfg?.accounts?.[accountId]?.appMentionRetryTtlMs;
+  const topLevel = slackCfg?.appMentionRetryTtlMs;
+  const candidate =
+    typeof perAccount === "number" && Number.isFinite(perAccount)
+      ? perAccount
+      : typeof topLevel === "number" && Number.isFinite(topLevel)
+        ? topLevel
+        : DEFAULT_APP_MENTION_RETRY_TTL_MS;
+  if (candidate < MIN_APP_MENTION_RETRY_TTL_MS) {
+    return MIN_APP_MENTION_RETRY_TTL_MS;
+  }
+  return candidate;
+}
 
 export class SlackRetryableInboundError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -60,6 +92,7 @@ export function createSlackMessageHandler(params: {
   trackEvent?: () => void;
 }): SlackMessageHandler {
   const { ctx, account, trackEvent } = params;
+  const appMentionRetryTtlMs = resolveAppMentionRetryTtlMs(ctx.cfg, ctx.accountId);
   const { debounceMs, debouncer } = createChannelInboundDebouncer<{
     message: SlackMessageEvent;
     opts: { source: "message" | "app_mention"; wasMentioned?: boolean };
@@ -119,7 +152,7 @@ export function createSlackMessageHandler(params: {
           pruneAppMentionRetryKeys(Date.now());
           if (last.opts.source === "app_mention") {
             // If app_mention wins the race and dispatches first, drop the later message dispatch.
-            appMentionDispatchedKeys.set(seenMessageKey, Date.now() + APP_MENTION_RETRY_TTL_MS);
+            appMentionDispatchedKeys.set(seenMessageKey, Date.now() + appMentionRetryTtlMs);
           } else if (
             last.opts.source === "message" &&
             appMentionDispatchedKeys.has(seenMessageKey)
@@ -174,7 +207,7 @@ export function createSlackMessageHandler(params: {
   const rememberAppMentionRetryKey = (key: string) => {
     const now = Date.now();
     pruneAppMentionRetryKeys(now);
-    appMentionRetryKeys.set(key, now + APP_MENTION_RETRY_TTL_MS);
+    appMentionRetryKeys.set(key, now + appMentionRetryTtlMs);
   };
 
   const consumeAppMentionRetryKey = (key: string) => {

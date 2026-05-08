@@ -88,6 +88,7 @@ const { describeImageWithModel } = await import("./image.js");
 
 describe("describeImageWithModel", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -295,6 +296,35 @@ describe("describeImageWithModel", () => {
     expect(completeMock).toHaveBeenCalledOnce();
   });
 
+  it("reports the resolved model input when an image model is text-only", async () => {
+    discoverModelsMock.mockReturnValue({
+      find: vi.fn(() => ({
+        provider: "lmstudio",
+        id: "text-only",
+        api: "openai-completions",
+        input: ["text"],
+        baseUrl: "http://127.0.0.1:1234",
+      })),
+    });
+
+    await expect(
+      describeImageWithModel({
+        cfg: {},
+        agentDir: "/tmp/openclaw-agent",
+        provider: "lmstudio",
+        model: "text-only",
+        buffer: Buffer.from("png-bytes"),
+        fileName: "image.png",
+        mime: "image/png",
+        prompt: "Describe the image.",
+        timeoutMs: 1000,
+      }),
+    ).rejects.toThrow(
+      "Model does not support images: lmstudio/text-only (resolved lmstudio/text-only input: text)",
+    );
+    expect(completeMock).not.toHaveBeenCalled();
+  });
+
   it("passes image prompt as system instructions for codex image requests", async () => {
     discoverModelsMock.mockReturnValue({
       find: vi.fn(() => ({
@@ -352,8 +382,17 @@ describe("describeImageWithModel", () => {
       }),
       expect.any(Object),
     );
-    const [, context] = completeMock.mock.calls[0] ?? [];
-    expect(context?.messages?.[0]?.content).toHaveLength(1);
+    const firstCall = completeMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected image completion call");
+    }
+    const [, context] = firstCall;
+    const userMessage = context.messages[0];
+    expect(userMessage).toBeDefined();
+    if (!userMessage) {
+      throw new Error("expected image completion user message");
+    }
+    expect(userMessage.content).toHaveLength(1);
   });
 
   it("places OpenRouter image prompts in user content before images", async () => {
@@ -392,9 +431,18 @@ describe("describeImageWithModel", () => {
       text: "openrouter ok",
       model: "google/gemini-2.5-flash",
     });
-    const [, context] = completeMock.mock.calls[0] ?? [];
-    expect(context?.systemPrompt).toBeUndefined();
-    expect(context?.messages?.[0]?.content).toEqual([
+    const firstCall = completeMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected OpenRouter image completion call");
+    }
+    const [, context] = firstCall;
+    expect(context.systemPrompt).toBeUndefined();
+    const userMessage = context.messages[0];
+    expect(userMessage).toBeDefined();
+    if (!userMessage) {
+      throw new Error("expected OpenRouter image completion user message");
+    }
+    expect(userMessage.content).toEqual([
       { type: "text", text: "Describe the image." },
       expect.objectContaining({
         type: "image",
@@ -506,19 +554,87 @@ describe("describeImageWithModel", () => {
         model: model.id,
       });
       expect(completeMock).toHaveBeenCalledTimes(2);
-      const [, , retryOptions] = completeMock.mock.calls[1] ?? [];
-      expect(retryOptions?.onPayload).toEqual(expect.any(Function));
-      const retryPayload = await retryOptions?.onPayload?.(
+      const retryCall = completeMock.mock.calls[1];
+      if (!retryCall) {
+        throw new Error("Expected retry image completion call");
+      }
+      const [retryModel, , retryOptions] = retryCall;
+      if (!retryOptions?.onPayload) {
+        throw new Error("expected retry payload mapper");
+      }
+      const retryPayload = await retryOptions.onPayload(
         {
           reasoning: { effort: "high", summary: "auto" },
           reasoning_effort: "high",
           include: ["reasoning.encrypted_content"],
         },
-        completeMock.mock.calls[1]?.[0],
+        retryModel,
       );
       expect(retryPayload).toEqual(expectedRetryPayload);
     },
   );
+
+  it("rejects when a generic image completion ignores the abort signal", async () => {
+    vi.useFakeTimers();
+    discoverModelsMock.mockReturnValue({
+      find: vi.fn(() => ({
+        api: "openai-responses",
+        provider: "openai",
+        id: "gpt-5.4-mini",
+        input: ["text", "image"],
+        baseUrl: "https://api.openai.com/v1",
+      })),
+    });
+    completeMock.mockImplementation(() => new Promise(() => {}));
+
+    const result = describeImageWithModel({
+      cfg: {},
+      agentDir: "/tmp/openclaw-agent",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      buffer: Buffer.from("png-bytes"),
+      fileName: "image.png",
+      mime: "image/png",
+      prompt: "Describe the image.",
+      timeoutMs: 25,
+    });
+
+    const assertion = expect(result).rejects.toThrow("image description timed out after 25ms");
+    await vi.advanceTimersByTimeAsync(25);
+    await assertion;
+    const firstCall = completeMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected timed image completion call");
+    }
+    const [, , options] = firstCall;
+    if (!options?.signal) {
+      throw new Error("Expected image completion abort signal");
+    }
+    expect(options.signal.aborted).toBe(true);
+    expect(options.timeoutMs).toBe(25);
+  });
+
+  it("rejects when image runtime setup exceeds the request timeout", async () => {
+    vi.useFakeTimers();
+    ensureOpenClawModelsJsonMock.mockImplementationOnce(() => new Promise(() => {}));
+
+    const result = describeImageWithModel({
+      cfg: {},
+      agentDir: "/tmp/openclaw-agent",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      buffer: Buffer.from("png-bytes"),
+      fileName: "image.png",
+      mime: "image/png",
+      prompt: "Describe the image.",
+      timeoutMs: 25,
+    });
+
+    const assertion = expect(result).rejects.toThrow("image description timed out after 25ms");
+    await vi.advanceTimersByTimeAsync(25);
+    await assertion;
+    expect(completeMock).not.toHaveBeenCalled();
+  });
 
   it("normalizes deprecated google flash ids before lookup and keeps profile auth selection", async () => {
     const findMock = vi.fn((provider: string, modelId: string) => {

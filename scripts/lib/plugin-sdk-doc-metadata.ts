@@ -6,7 +6,7 @@ export type PluginSdkDocCategory =
   | "runtime"
   | "utilities";
 
-export type PluginSdkDocMetadata = {
+type PluginSdkDocMetadata = {
   category: PluginSdkDocCategory;
 };
 
@@ -77,6 +77,9 @@ export const pluginSdkDocMetadata = {
   "command-auth": {
     category: "channel",
   },
+  zalouser: {
+    category: "channel",
+  },
   "command-status": {
     category: "channel",
   },
@@ -95,10 +98,16 @@ export const pluginSdkDocMetadata = {
   "provider-selection-runtime": {
     category: "provider",
   },
-  opencode: {
+  "runtime-store": {
+    category: "runtime",
+  },
+  "agent-runtime": {
+    category: "runtime",
+  },
+  "speech-core": {
     category: "provider",
   },
-  "runtime-store": {
+  "tts-runtime": {
     category: "runtime",
   },
   "allow-from": {
@@ -134,19 +143,6 @@ export const pluginSdkDocMetadata = {
 } as const satisfies Record<string, PluginSdkDocMetadata>;
 
 export type PluginSdkDocEntrypoint = keyof typeof pluginSdkDocMetadata;
-
-export const pluginSdkDocCategories = [
-  "core",
-  "channel",
-  "provider",
-  "runtime",
-  "utilities",
-  "legacy",
-] as const satisfies readonly PluginSdkDocCategory[];
-
-export const pluginSdkDocEntrypoints = Object.keys(
-  pluginSdkDocMetadata,
-) as PluginSdkDocEntrypoint[];
 
 export function resolvePluginSdkDocImportSpecifier(entrypoint: PluginSdkDocEntrypoint): string {
   return entrypoint === "index" ? "openclaw/plugin-sdk" : `openclaw/plugin-sdk/${entrypoint}`;

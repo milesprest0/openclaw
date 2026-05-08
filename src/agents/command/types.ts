@@ -17,6 +17,9 @@ export type { AgentStreamParams } from "./shared-types.js";
 export type AgentCommandResultMetaOverrides = {
   transport?: "embedded";
   fallbackFrom?: "gateway";
+  fallbackReason?: "gateway_timeout";
+  fallbackSessionId?: string;
+  fallbackSessionKey?: string;
 };
 
 export type AcpTurnSource = "manual_spawn";
@@ -68,6 +71,8 @@ export type AgentCommandOpts = {
   threadId?: string | number;
   /** Message channel context. */
   messageChannel?: string;
+  /** Tool-policy/output surface context. Defaults to messageChannel. */
+  messageProvider?: string;
   /** Delivery channel. */
   channel?: string;
   /** Account ID for multi-account channel routing. */
@@ -78,6 +83,8 @@ export type AgentCommandOpts = {
   senderIsOwner?: boolean;
   /** Whether this caller is authorized to use provider/model per-run overrides. */
   allowModelOverride?: boolean;
+  /** Optional runtime tool allow-list; when set, only these tools are exposed for this run. */
+  toolsAllow?: string[];
   /** Group/spawn metadata for subagent policy inheritance and routing context. */
   groupId?: SpawnedRunMetadata["groupId"];
   groupChannel?: SpawnedRunMetadata["groupChannel"];
@@ -101,6 +108,8 @@ export type AgentCommandOpts = {
   workspaceDir?: SpawnedRunMetadata["workspaceDir"];
   /** Force bundled MCP teardown when a one-shot local run completes. */
   cleanupBundleMcpOnRunEnd?: boolean;
+  /** Force long-lived CLI live session teardown when a one-shot local run completes. */
+  cleanupCliLiveSessionOnRunEnd?: boolean;
   /** Internal local CLI callers can annotate result metadata before JSON/text output. */
   resultMetaOverrides?: AgentCommandResultMetaOverrides;
   /** Internal one-shot model probe mode: no tools, no workspace/chat prompt policy. */

@@ -106,11 +106,22 @@ export type SlackThreadConfig = {
   requireExplicitMention?: boolean;
 };
 
+export type SlackSocketModeConfig = {
+  /** Slack SDK pong timeout in milliseconds. Socket Mode only. Default: 15000. */
+  clientPingTimeout?: number;
+  /** Slack SDK server ping timeout in milliseconds. Socket Mode only. */
+  serverPingTimeout?: number;
+  /** Enable Slack SDK ping/pong transport logging. Socket Mode only. */
+  pingPongLoggingEnabled?: boolean;
+};
+
 export type SlackAccountConfig = {
   /** Optional display name for this account (used in CLI/UI lists). */
   name?: string;
   /** Slack connection mode (socket|http). Default: socket. */
   mode?: "socket" | "http";
+  /** Slack SDK Socket Mode transport options. Ignored in HTTP mode. */
+  socketMode?: SlackSocketModeConfig;
   /** Slack signing secret (required for HTTP mode). */
   signingSecret?: string;
   /** Slack Events API webhook path (default: /slack/events). */
@@ -176,12 +187,12 @@ export type SlackAccountConfig = {
   actions?: SlackActionConfig;
   slashCommand?: SlackSlashCommandConfig;
   /**
-   * Alias for dm.policy (prefer this so it inherits cleanly via base->account shallow merge).
+   * Canonical DM policy key. Doctor migrates legacy channels.slack.dm.policy here.
    * Legacy key: channels.slack.dm.policy.
    */
   dmPolicy?: DmPolicy;
   /**
-   * Alias for dm.allowFrom (prefer this so it inherits cleanly via base->account shallow merge).
+   * Canonical DM allowlist. Doctor migrates legacy channels.slack.dm.allowFrom here.
    * Legacy key: channels.slack.dm.allowFrom.
    */
   allowFrom?: Array<string | number>;
@@ -202,6 +213,21 @@ export type SlackAccountConfig = {
   ackReaction?: string;
   /** Reaction emoji added while processing a reply (e.g. "hourglass_flowing_sand"). Removed when done. Useful as a typing indicator fallback when assistant mode is not enabled. */
   typingReaction?: string;
+  /**
+   * TTL in milliseconds for the Slack socket-mode `app_mention` retry-dedup
+   * window. Slack emits both a `message` and a sibling `app_mention` event for
+   * every @mention (same `ts`). The handler dedupes them via a short-lived
+   * retry key. If an agent turn runs longer than this TTL, the sibling event
+   * arrives AFTER the retry key is pruned, falls into the `wasSeen +
+   * !consumeRetry` branch, and is silently dropped.
+   *
+   * Default: 900000 (15 min) — chosen to survive the longest realistic single
+   * turn. Minimum enforced: 60000 (60s). Memory stays bounded because the
+   * retry map is pruned on every access.
+   *
+   * Retires runtime patch 013 (see PRE-175 C fork-patch retirement).
+   */
+  appMentionRetryTtlMs?: number;
 };
 
 export type SlackConfig = {

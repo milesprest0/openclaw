@@ -39,13 +39,13 @@ async function withLiveImageWorkspace<T>(
 }
 
 describe.skipIf(!LIVE)("image tool Ollama live", () => {
-  it("describes a local image through the explicit image tool", async () => {
+  it("describes a local image through a providerless configured Ollama image model", async () => {
     process.env.OLLAMA_API_KEY ||= "ollama-local";
     await withLiveImageWorkspace(async ({ agentDir, workspaceDir, imagePath }) => {
       const cfg: OpenClawConfig = {
         agents: {
           defaults: {
-            imageModel: { primary: `ollama/${OLLAMA_IMAGE_MODEL}` },
+            imageModel: { primary: OLLAMA_IMAGE_MODEL },
           },
         },
         models: {
@@ -80,9 +80,12 @@ describe.skipIf(!LIVE)("image tool Ollama live", () => {
         },
       };
       const tool = createImageTool({ config: cfg, agentDir, workspaceDir });
-      expect(tool).not.toBeNull();
+      expect(typeof tool?.execute).toBe("function");
+      if (!tool) {
+        throw new Error("expected image tool");
+      }
 
-      const result = await tool!.execute("live-ollama-image", {
+      const result = await tool.execute("live-ollama-image", {
         prompt: "Describe this image in one short sentence.",
         image: imagePath,
       });
