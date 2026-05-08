@@ -19,3 +19,16 @@ export type {
   StateStoreWatchCallback,
   StateStoreWriteOptions,
 } from "./state-store.js";
+
+export {
+  DEFAULT_EVENT_DEDUP_TTL_MS,
+  EVENT_DEDUP_NAMESPACE,
+  MIN_EVENT_DEDUP_TTL_MS,
+  createEventDedupStore,
+} from "./event-dedup-store.js";
+export type {
+  EventDedupCheckInput,
+  EventDedupRecord,
+  EventDedupStore,
+  EventDedupStoreOptions,
+} from "./event-dedup-store.js";
