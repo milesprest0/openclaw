@@ -1043,6 +1043,17 @@ export const SlackAccountSchema = z
     typingReaction: z.string().optional(),
     // Retires runtime patch 013 (PRE-175 C). See SlackAccountConfig.appMentionRetryTtlMs.
     appMentionRetryTtlMs: z.number().int().min(60_000).optional(),
+    // Track Beta (PRE-172) — Slack Events API dark-launch gate.
+    // See SlackAccountConfig.eventsApi. When enabled:true, the gateway mounts
+    // the `/slack/events` endpoint. Dispatch wiring is NOT included in this
+    // PR — dark-launch only, logs + dedup + signature verify.
+    eventsApi: z
+      .object({
+        enabled: z.boolean().optional(),
+        webhookPath: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine(() => {
