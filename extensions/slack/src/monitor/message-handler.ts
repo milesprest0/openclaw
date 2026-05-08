@@ -27,7 +27,16 @@ export type SlackMessageHandler = (
   opts: { source: "message" | "app_mention"; wasMentioned?: boolean },
 ) => Promise<void>;
 
-const APP_MENTION_RETRY_TTL_MS = 60_000;
+// [openclaw-fork-patch-013] BUG-051 app_mention retry TTL bump 60s -> 900s.
+// Slack socket-mode fires two events per @mention (a `message` and an
+// `app_mention` with the same ts). Dedup via appMentionRetryKeys has a TTL
+// so the second event can match against the first. At 60s, under heavy agent
+// turns that commonly run 60-240s, the sibling app_mention arrives AFTER
+// the retry key has been pruned, falls into the wasSeen+!consumeRetry branch
+// at ~line 2549 of the bundle, and silently returns before the ingress audit
+// ever fires. Raising to 15 minutes gives plenty of headroom; the map is
+// still pruned on every access, so memory growth is bounded.
+const APP_MENTION_RETRY_TTL_MS = 900_000;
 
 export class SlackRetryableInboundError extends Error {
   constructor(message: string, options?: ErrorOptions) {
