@@ -49,7 +49,18 @@ export function startGatewayCronWithLogging(params: {
   cron: { start: () => Promise<void> };
   logCron: { error: (message: string) => void };
 }): void {
-  void params.cron.start().catch((err) => params.logCron.error(`failed to start: ${String(err)}`));
+  void params.cron.start().catch((err) => {
+    // BUG-054: emit the full stack trace when the cron runner fails to start.
+    // A bare `String(err)` collapses `TypeError: Cannot read properties of
+    // undefined (reading 'kind')` into a single line with no call site, which
+    // made the regression extremely hard to root-cause. Preserve the stack if
+    // the thrown value is an `Error`, fall back to `String(err)` otherwise.
+    const detail =
+      err instanceof Error && typeof err.stack === "string" && err.stack.length > 0
+        ? err.stack
+        : String(err);
+    params.logCron.error(`failed to start: ${detail}`);
+  });
 }
 
 function recoverPendingOutboundDeliveries(params: {
