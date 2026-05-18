@@ -156,6 +156,14 @@ export async function persist(
   if (!state.store) {
     return;
   }
+  // PRE-176: suppress the file-watcher's next reload so our own write
+  // doesn't kick off an immediate no-op reload cycle. 200ms covers the
+  // typical fsync + debounce window.
+  try {
+    state.fileWatcher?.suppressFor(200);
+  } catch {
+    /* noop */
+  }
   await saveCronStore(state.deps.storePath, state.store, opts);
   // Update file mtime after save to prevent immediate reload
   state.storeFileMtimeMs = await getFileMtimeMs(state.deps.storePath);
