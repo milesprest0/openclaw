@@ -228,6 +228,27 @@ export type SlackAccountConfig = {
    * Retires runtime patch 013 (see PRE-175 C fork-patch retirement).
    */
   appMentionRetryTtlMs?: number;
+  /**
+   * Track Beta (PRE-172) — Slack Events API dark-launch gate.
+   *
+   * When `enabled: true`, the gateway mounts the `/slack/events` HTTP
+   * endpoint. The endpoint accepts URL verification challenges, verifies
+   * request signatures, dedupes by `event_id`, and logs every event.
+   * **In this PR the endpoint NEVER dispatches to the agent.** Dispatch
+   * wiring lands in a later PR once dark-launch metrics are clean.
+   *
+   * Default: undefined / false (endpoint returns HTTP 503).
+   *
+   * See: memory/2026-05-08-track-beta-slack-resilience-plan.md
+   */
+  eventsApi?: {
+    enabled?: boolean;
+    /**
+     * Override the Events API mount path. Default: `/slack/events`.
+     * Change only when the gateway ingress needs a non-standard route.
+     */
+    webhookPath?: string;
+  };
 };
 
 export type SlackConfig = {
