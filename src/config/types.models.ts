@@ -110,6 +110,21 @@ export type ModelDefinitionConfig = {
   maxTokens: number;
   /** Provider-specific request/runtime parameters passed through to provider plugins. */
   params?: Record<string, unknown>;
+  /**
+   * Idle-progress heartbeat interval (ms) for streaming responses. When the
+   * provider goes silent for this long during a stream, the transport emits a
+   * `stream_heartbeat` event so downstream consumers can show progress.
+   * Defaults to 20000 ms. A non-positive value disables the heartbeat.
+   */
+  idleHeartbeatMs?: number;
+  /**
+   * Idle-fallback threshold (ms) for streaming responses. When the provider
+   * sends no chunks for this long during a stream, the transport aborts the
+   * upstream iteration and throws a retryable timeout error so the model-
+   * fallback machinery rotates to the next candidate. Defaults to 90000 ms.
+   * A non-positive value disables the idle-fallback trigger.
+   */
+  idleFallbackMs?: number;
   /** Optional agent execution runtime override for this provider/model pair. */
   agentRuntime?: AgentRuntimePolicyConfig;
   headers?: Record<string, string>;

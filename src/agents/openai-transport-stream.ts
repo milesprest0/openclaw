@@ -49,6 +49,11 @@ import {
 } from "./openai-tool-schema.js";
 import { resolveProviderRequestPolicyConfig } from "./provider-request-config.js";
 import {
+  createProviderIdleTimeoutError,
+  resolveIdleDetectionKnobs,
+  wrapAsyncIterableWithIdleDetection,
+} from "./provider-stream-idle.js";
+import {
   buildGuardedModelFetch,
   resolveModelRequestTimeoutMs,
 } from "./provider-transport-fetch.js";
@@ -454,7 +459,26 @@ async function processResponsesStream(
   let currentItem: Record<string, unknown> | null = null;
   let currentBlock: Record<string, unknown> | null = null;
   const blockIndex = () => output.content.length - 1;
-  for await (const rawEvent of openaiStream) {
+  const idleKnobs = resolveIdleDetectionKnobs(model);
+  const idleAwareStream = wrapAsyncIterableWithIdleDetection(openaiStream, {
+    idleHeartbeatMs: idleKnobs.idleHeartbeatMs,
+    idleFallbackMs: idleKnobs.idleFallbackMs,
+    onHeartbeat: ({ elapsedMs }) => {
+      stream.push({
+        type: "stream_heartbeat",
+        elapsedMs,
+        partial: output,
+      });
+    },
+    onIdleFallback: ({ elapsedMs }) =>
+      createProviderIdleTimeoutError({
+        provider: model.provider,
+        modelId: model.id,
+        elapsedMs,
+        fallbackMs: idleKnobs.idleFallbackMs,
+      }),
+  });
+  for await (const rawEvent of idleAwareStream) {
     const event = rawEvent as Record<string, unknown>;
     const type = stringifyUnknown(event.type);
     if (type === "response.created") {
@@ -1466,7 +1490,29 @@ async function processOpenAICompletionsStream(
     flushPendingPostToolCallDeltas();
     appendTextDeltaInternal(text);
   };
-  for await (const rawChunk of responseStream as AsyncIterable<unknown>) {
+  const idleKnobs = resolveIdleDetectionKnobs(model);
+  const idleAwareCompletionsStream = wrapAsyncIterableWithIdleDetection(
+    responseStream as AsyncIterable<unknown>,
+    {
+      idleHeartbeatMs: idleKnobs.idleHeartbeatMs,
+      idleFallbackMs: idleKnobs.idleFallbackMs,
+      onHeartbeat: ({ elapsedMs }) => {
+        stream.push({
+          type: "stream_heartbeat",
+          elapsedMs,
+          partial: output,
+        });
+      },
+      onIdleFallback: ({ elapsedMs }) =>
+        createProviderIdleTimeoutError({
+          provider: model.provider,
+          modelId: model.id,
+          elapsedMs,
+          fallbackMs: idleKnobs.idleFallbackMs,
+        }),
+    },
+  );
+  for await (const rawChunk of idleAwareCompletionsStream) {
     if (!rawChunk || typeof rawChunk !== "object") {
       continue;
     }
