@@ -28,6 +28,7 @@ import {
   resolveSlackAccountDmPolicy,
 } from "../accounts.js";
 import { resolveSlackWebClientOptions } from "../client-options.js";
+import { createSlackEventsApiNodeHandler, EVENTS_API_DEFAULT_PATH } from "../events-api/index.js";
 import { isSlackExecApprovalClientEnabled } from "../exec-approvals.js";
 import { normalizeSlackWebhookPath, registerSlackHttpHandler } from "../http/index.js";
 import { SLACK_TEXT_LIMIT } from "../limits.js";
@@ -290,6 +291,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
         }
       : null;
   let unregisterHttpHandler: (() => void) | null = null;
+  let unregisterEventsApiHandler: (() => void) | null = null;
 
   let botUserId = "";
   let botId = "";
@@ -380,7 +382,52 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
 
   registerSlackMonitorEvents({ ctx, account, handleSlackMessage, trackEvent });
   await registerSlackMonitorSlashCommands({ ctx, account, trackEvent });
-  if (slackMode === "http" && slackHttpHandler) {
+
+  // PRE-172 Phase 1 gap closure — Slack Events API HTTP route.
+  //
+  // Precedence rule (Miles directive 2026-05-21):
+  //   When eventsApi.enabled === true AND mode === "http", the Events API
+  //   handler takes precedence over the legacy Bolt HTTP receiver. We log
+  //   a warning so the operator sees that `mode: "http"` is being shadowed.
+  //
+  // When eventsApi.enabled === true (regardless of mode), the dedicated
+  // `/slack/events` Events API handler is registered.
+  //
+  // When eventsApi.enabled is falsy AND mode === "http", the legacy Bolt
+  // HTTP receiver remains the only mounted route (no behavior change).
+  //
+  // When eventsApi.enabled is falsy AND mode === "socket", nothing HTTP
+  // is mounted (no behavior change).
+  const eventsApiCfg = slackCfg.eventsApi;
+  const eventsApiEnabled = eventsApiCfg?.enabled === true;
+  if (eventsApiEnabled) {
+    if (slackMode === "http") {
+      runtime.log?.(
+        warn(
+          `[${account.accountId}] slack: eventsApi.enabled=true takes precedence over mode="http"; legacy Bolt HTTP receiver will NOT be mounted for this account`,
+        ),
+      );
+    }
+    const eventsApiPath = normalizeSlackWebhookPath(
+      eventsApiCfg?.webhookPath ?? EVENTS_API_DEFAULT_PATH,
+    );
+    const eventsApiHandler = createSlackEventsApiNodeHandler({
+      config: {
+        enabled: true,
+        signingSecret: signingSecret ?? "",
+        workspaceId: teamId || undefined,
+        vmAccount: account.accountId,
+      },
+      maxBodyBytes: SLACK_WEBHOOK_MAX_BODY_BYTES,
+      bodyTimeoutMs: SLACK_WEBHOOK_BODY_TIMEOUT_MS,
+    });
+    unregisterEventsApiHandler = registerSlackHttpHandler({
+      path: eventsApiPath,
+      handler: eventsApiHandler,
+      log: runtime.log,
+      accountId: account.accountId,
+    });
+  } else if (slackMode === "http" && slackHttpHandler) {
     unregisterHttpHandler = registerSlackHttpHandler({
       path: slackWebhookPath,
       handler: slackHttpHandler,
@@ -637,6 +684,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
   } finally {
     opts.abortSignal?.removeEventListener("abort", stopOnAbort);
     unregisterHttpHandler?.();
+    unregisterEventsApiHandler?.();
     await gracefulStop();
   }
 }
