@@ -35,6 +35,7 @@ import { parseSlackTarget } from "./targets.js";
 import { normalizeSlackThreadTsCandidate } from "./thread-ts.js";
 import { resolveSlackBotToken } from "./token.js";
 import { truncateSlackText } from "./truncate.js";
+import { applyVoiceDiscipline } from "./voice-discipline.js";
 const SLACK_UPLOAD_SSRF_POLICY = {
   allowedHostnames: ["*.slack.com", "*.slack-edge.com", "*.slack-files.com"],
   allowRfc2544BenchmarkRange: true,
@@ -542,7 +543,12 @@ export async function sendMessageSlack(
   message: string,
   opts: SlackSendOpts,
 ): Promise<SlackSendResult> {
-  const trimmedMessage = normalizeOptionalString(message) ?? "";
+  const rawMessage = normalizeOptionalString(message) ?? "";
+  // Apply voice-discipline middleware BEFORE the NO_REPLY check so that
+  // stripping cannot accidentally produce a silent-reply sentinel; if the
+  // message was already a silent-reply, the middleware leaves it alone
+  // because no process-header patterns match.
+  const trimmedMessage = applyVoiceDiscipline(rawMessage);
   if (isSilentReplyText(trimmedMessage) && !opts.mediaUrl && !opts.blocks) {
     logVerbose("slack send: suppressed NO_REPLY token before API call");
     return {
