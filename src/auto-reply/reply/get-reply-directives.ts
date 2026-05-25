@@ -140,6 +140,63 @@ export type ReplyDirectiveResult =
   | { kind: "reply"; reply: ReplyPayload | ReplyPayload[] | undefined }
   | { kind: "continue"; result: ReplyDirectiveContinuation };
 
+function adaptiveThinkingLevelOverride(text: string, currentLevel: ThinkLevel): ThinkLevel {
+  const cleanText = (text ?? "").trim().toLowerCase();
+  if (!cleanText) {
+    return "medium";
+  }
+  if (
+    cleanText.includes("xhigh") ||
+    cleanText.includes("highest-tier") ||
+    cleanText.includes("reasoning = xhigh") ||
+    cleanText.includes("reasoning=xhigh")
+  ) {
+    return "xhigh";
+  }
+  const isStrategic =
+    cleanText.includes("deep research") ||
+    cleanText.includes("research this") ||
+    cleanText.includes("please research") ||
+    cleanText.includes("investigate") ||
+    cleanText.includes("posture") ||
+    cleanText.includes("rca") ||
+    cleanText.includes("diagnose") ||
+    cleanText.includes("audit") ||
+    cleanText.includes("pre-hearing") ||
+    cleanText.includes("prehearing") ||
+    cleanText.includes("phs") ||
+    cleanText.includes("rule 10563") ||
+    cleanText.includes("i-589") ||
+    cleanText.includes("asylum") ||
+    cleanText.includes("demand letter") ||
+    /§\s*\d+/.test(cleanText) ||
+    /labor code/i.test(cleanText) ||
+    /uscis/i.test(cleanText);
+  if (isStrategic) {
+    return currentLevel === "xhigh" || currentLevel === "max" ? currentLevel : "high";
+  }
+  const isTrivial =
+    cleanText === "you working?" ||
+    cleanText === "working?" ||
+    cleanText === "hello" ||
+    cleanText === "hi" ||
+    cleanText === "ping" ||
+    cleanText === "pong" ||
+    cleanText === "ok" ||
+    cleanText === "ack" ||
+    cleanText === "thanks" ||
+    cleanText === "thank you" ||
+    cleanText === "done" ||
+    cleanText === "test";
+  if (isTrivial) {
+    return "off";
+  }
+  if (currentLevel === "off") {
+    return "off";
+  }
+  return "medium";
+}
+
 export async function resolveReplyDirectives(params: {
   ctx: MsgContext;
   cfg: OpenClawConfig;
@@ -521,10 +578,16 @@ export async function resolveReplyDirectives(params: {
       });
   provider = modelState.provider;
   model = modelState.model;
-  const resolvedThinkLevelWithDefault =
+  const rawResolvedThinkLevelWithDefault =
     resolvedThinkLevel ??
     (await modelState.resolveDefaultThinkingLevel()) ??
-    (agentCfg?.thinkingDefault as ThinkLevel | undefined);
+    (agentCfg?.thinkingDefault as ThinkLevel | undefined) ??
+    "off";
+
+  const resolvedThinkLevelWithDefault = adaptiveThinkingLevelOverride(
+    commandText,
+    rawResolvedThinkLevelWithDefault,
+  );
 
   const thinkingExplicitlySet =
     directives.thinkLevel !== undefined ||
