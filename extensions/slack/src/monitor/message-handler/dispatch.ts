@@ -298,6 +298,24 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   const { ctx, account, message, route } = prepared;
   const cfg = ctx.cfg;
   const runtime = ctx.runtime;
+  const dispatchAuditBase = {
+    event: "slack_ingress_audit",
+    phase: "dispatch_started",
+    accountId: account.accountId,
+    channel: message.channel,
+    ts: message.ts,
+    eventTs: message.event_ts,
+    threadTs: message.thread_ts,
+    parentUserId: message.parent_user_id,
+    senderId: message.user ?? message.bot_id,
+    routeAgentId: route.agentId,
+    replyTarget: prepared.replyTarget,
+    sessionKey: prepared.ctxPayload.SessionKey,
+    messageThreadId: prepared.ctxPayload.MessageThreadId,
+    isDirectMessage: prepared.isDirectMessage,
+    isRoomish: prepared.isRoomish,
+  };
+  ctx.logger.info(dispatchAuditBase, "slack ingress audit: phase=dispatch_started");
 
   // Resolve agent identity for Slack chat:write.customize overrides.
   const outboundIdentity = resolveAgentOutboundIdentity(cfg, route.agentId);
@@ -1330,6 +1348,16 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   }
 
   if (dispatchError) {
+    ctx.logger.warn(
+      {
+        ...dispatchAuditBase,
+        phase: "dispatch_error",
+        error: formatErrorMessage(dispatchError),
+        counts,
+        queuedFinal,
+      },
+      "slack ingress audit: phase=dispatch_error",
+    );
     throw dispatchError;
   }
 
@@ -1342,6 +1370,20 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
       agentId: route.agentId,
     });
   }
+
+  ctx.logger.info(
+    {
+      ...dispatchAuditBase,
+      phase: anyReplyDelivered ? "dispatch_completed" : "dispatch_silent",
+      anyReplyDelivered,
+      counts,
+      queuedFinal,
+      streamFallbackDelivered,
+      usedReplyThreadTs,
+      statusThreadTs,
+    },
+    `slack ingress audit: phase=${anyReplyDelivered ? "dispatch_completed" : "dispatch_silent"}`,
+  );
 
   if (!anyReplyDelivered) {
     await draftStream?.clear();
