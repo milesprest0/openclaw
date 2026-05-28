@@ -269,6 +269,13 @@ export type SessionEntry = {
    * Resets only preserve user-driven overrides.
    */
   modelOverrideSource?: "auto" | "user";
+  /**
+   * Epoch ms when `modelOverride` was last written. Used to expire stale
+   * `"auto"`-source pins so a long-lived session re-resolves the live
+   * configured default instead of staying bound to the model that was
+   * default at session-creation time. User-source overrides never expire.
+   */
+  modelOverrideAt?: number;
   authProfileOverride?: string;
   authProfileOverrideSource?: "auto" | "user";
   authProfileOverrideCompactionCount?: number;
