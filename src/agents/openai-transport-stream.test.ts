@@ -2116,6 +2116,80 @@ describe("openai transport stream", () => {
     expect(params.messages?.[0]?.content).toBe("Stable prefix\nDynamic suffix");
   });
 
+  it("keeps OpenRouter Gemini stable-prefix system prompt bytes identical across dynamic suffix changes", () => {
+    const model = {
+      id: "openrouter/google/gemini-2.5-pro",
+      name: "Gemini 2.5 Pro",
+      api: "openai-completions",
+      provider: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200000,
+      maxTokens: 8192,
+    } satisfies Model<"openai-completions">;
+
+    const firstTurn = buildOpenAICompletionsParams(
+      model,
+      {
+        systemPrompt: `Stable prefix${SYSTEM_PROMPT_CACHE_BOUNDARY}Volatile timestamp: 2026-05-28T10:00:00Z`,
+        messages: [{ role: "user", content: "hi", timestamp: 1 }],
+        tools: [],
+      } as never,
+      undefined,
+    ) as { messages?: Array<{ role?: string; content?: string }> };
+
+    const secondTurn = buildOpenAICompletionsParams(
+      model,
+      {
+        systemPrompt: `Stable prefix${SYSTEM_PROMPT_CACHE_BOUNDARY}Volatile timestamp: 2026-05-28T10:00:01Z`,
+        messages: [{ role: "user", content: "hi", timestamp: 1 }],
+        tools: [],
+      } as never,
+      undefined,
+    ) as { messages?: Array<{ role?: string; content?: string }> };
+
+    expect(firstTurn.messages?.slice(0, 3)).toEqual([
+      { role: "system", content: "Stable prefix" },
+      { role: "system", content: "Volatile timestamp: 2026-05-28T10:00:00Z" },
+      { role: "user", content: "hi" },
+    ]);
+    expect(secondTurn.messages?.slice(0, 3)).toEqual([
+      { role: "system", content: "Stable prefix" },
+      { role: "system", content: "Volatile timestamp: 2026-05-28T10:00:01Z" },
+      { role: "user", content: "hi" },
+    ]);
+    expect(firstTurn.messages?.[0]?.content).toBe(secondTurn.messages?.[0]?.content);
+    expect(firstTurn.messages?.[0]?.content).not.toContain("2026-05-28T10:00:00Z");
+    expect(firstTurn.messages?.[0]?.content).not.toContain("2026-05-28T10:00:01Z");
+  });
+
+  it("leaves non-Gemini OpenRouter system prompt boundary behavior unchanged", () => {
+    const params = buildOpenAICompletionsParams(
+      {
+        id: "openrouter/qwen/qwen3-235b-a22b",
+        name: "Qwen3 235B",
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 8192,
+      } satisfies Model<"openai-completions">,
+      {
+        systemPrompt: `Stable prefix${SYSTEM_PROMPT_CACHE_BOUNDARY}Dynamic suffix`,
+        messages: [],
+        tools: [],
+      } as never,
+      undefined,
+    ) as { messages?: Array<{ role?: string; content?: string }> };
+
+    expect(params.messages).toEqual([{ role: "system", content: "Stable prefix\nDynamic suffix" }]);
+  });
+
   it("uses shared stream reasoning as OpenAI completions effort", () => {
     const params = buildOpenAICompletionsParams(
       {

@@ -57,7 +57,10 @@ import {
   buildGuardedModelFetch,
   resolveModelRequestTimeoutMs,
 } from "./provider-transport-fetch.js";
-import { stripSystemPromptCacheBoundary } from "./system-prompt-cache-boundary.js";
+import {
+  splitSystemPromptCacheBoundary,
+  stripSystemPromptCacheBoundary,
+} from "./system-prompt-cache-boundary.js";
 import { transformTransportMessages } from "./transport-message-transform.js";
 import { mergeTransportMetadata, sanitizeTransportPayloadText } from "./transport-stream-shared.js";
 
@@ -1908,6 +1911,47 @@ function requiresGoogleCompatToolCallThoughtSignature(model: OpenAIModeModel): b
   return model.id.toLowerCase().includes("gemini-3");
 }
 
+function isOpenRouterGeminiModel(model: OpenAIModeModel): boolean {
+  return model.provider === "openrouter" && model.id.toLowerCase().includes("google/gemini");
+}
+
+function resolveOpenRouterGeminiSystemPromptSplit(
+  model: OpenAIModeModel,
+  systemPrompt: string | undefined,
+): { stablePrefix: string; dynamicSuffix: string } | null {
+  if (!systemPrompt || !isOpenRouterGeminiModel(model)) {
+    return null;
+  }
+  const split = splitSystemPromptCacheBoundary(systemPrompt);
+  if (!split) {
+    return null;
+  }
+  return {
+    stablePrefix: sanitizeTransportPayloadText(stripSystemPromptCacheBoundary(split.stablePrefix)),
+    dynamicSuffix: sanitizeTransportPayloadText(
+      stripSystemPromptCacheBoundary(split.dynamicSuffix),
+    ),
+  };
+}
+
+function injectOpenRouterGeminiDynamicSystemSuffix(
+  messages: Array<Record<string, unknown>>,
+  dynamicSuffix: string,
+): void {
+  if (!dynamicSuffix) {
+    return;
+  }
+  const first = messages[0];
+  if (first && (first.role === "system" || first.role === "developer")) {
+    messages.splice(1, 0, {
+      role: first.role,
+      content: dynamicSuffix,
+    });
+    return;
+  }
+  messages.unshift({ role: "system", content: dynamicSuffix });
+}
+
 function injectToolCallThoughtSignatures(
   outgoingMessages: unknown[],
   context: Context,
@@ -1985,13 +2029,24 @@ export function buildOpenAICompletionsParams(
 ) {
   const compat = getCompat(model);
   const compatDetection = detectOpenAICompletionsCompat(model);
+  const openRouterGeminiPromptSplit = resolveOpenRouterGeminiSystemPromptSplit(
+    model,
+    context.systemPrompt,
+  );
   const completionsContext = context.systemPrompt
     ? {
         ...context,
-        systemPrompt: stripSystemPromptCacheBoundary(context.systemPrompt),
+        systemPrompt: openRouterGeminiPromptSplit
+          ? openRouterGeminiPromptSplit.stablePrefix
+          : stripSystemPromptCacheBoundary(context.systemPrompt),
       }
     : context;
-  const messages = convertMessages(model as never, completionsContext, compat as never);
+  const messages = convertMessages(model as never, completionsContext, compat as never) as Array<
+    Record<string, unknown>
+  >;
+  if (openRouterGeminiPromptSplit) {
+    injectOpenRouterGeminiDynamicSystemSuffix(messages, openRouterGeminiPromptSplit.dynamicSuffix);
+  }
   injectToolCallThoughtSignatures(messages as unknown[], context, model);
   const cacheRetention = resolveCacheRetention(options?.cacheRetention);
   const params: Record<string, unknown> = {
