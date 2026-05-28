@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   beginPromptCacheObservation,
   collectPromptCacheToolNames,
   completePromptCacheObservation,
+  emitGeminiImplicitCacheTelemetry,
   resetPromptCacheObservabilityForTest,
 } from "./prompt-cache-observability.js";
 
@@ -244,5 +245,43 @@ describe("prompt cache observability", () => {
       cacheRead: 2_000,
       changes: null,
     });
+  });
+
+  it("emits Phase 0 Gemini implicit-cache telemetry with cache hit ratio", () => {
+    const debug = vi.fn();
+
+    const telemetry = emitGeminiImplicitCacheTelemetry({
+      provider: "openrouter",
+      modelId: "openrouter/google/gemini-2.5-pro",
+      usage: { input: 2_000, cacheRead: 500 },
+      sessionKey: "agent:main",
+      debug,
+    });
+
+    expect(telemetry).toEqual({
+      provider: "openrouter",
+      modelId: "openrouter/google/gemini-2.5-pro",
+      inputTokens: 2_000,
+      cachedReadTokens: 500,
+      cacheHitRatio: 0.25,
+      sessionKey: "agent:main",
+    });
+    expect(debug).toHaveBeenCalledTimes(1);
+    expect(debug).toHaveBeenCalledWith("gemini implicit prompt-cache telemetry", telemetry);
+  });
+
+  it("does not emit Gemini implicit-cache telemetry for non-Gemini providers", () => {
+    const debug = vi.fn();
+
+    const telemetry = emitGeminiImplicitCacheTelemetry({
+      provider: "openai",
+      modelId: "gpt-5.5",
+      usage: { input: 2_000, cacheRead: 500 },
+      sessionKey: "agent:main",
+      debug,
+    });
+
+    expect(telemetry).toBeNull();
+    expect(debug).not.toHaveBeenCalled();
   });
 });

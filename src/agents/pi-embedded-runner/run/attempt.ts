@@ -195,6 +195,7 @@ import {
   collectPromptCacheToolNames,
   beginPromptCacheObservation,
   completePromptCacheObservation,
+  emitGeminiImplicitCacheTelemetry,
   type PromptCacheChange,
 } from "../prompt-cache-observability.js";
 import { resolveCacheRetention } from "../prompt-cache-retention.js";
@@ -3387,6 +3388,17 @@ export async function runEmbeddedAttempt(
           prePromptMessageCount,
         });
         attemptUsage = getUsageTotals();
+        // Phase 0 baseline telemetry: observe implicit Gemini cache reuse without
+        // modifying prompt assembly or provider request payloads.
+        emitGeminiImplicitCacheTelemetry({
+          provider: params.provider,
+          modelId: params.modelId,
+          usage: attemptUsage,
+          sessionKey: params.sessionKey ?? params.sessionId,
+          debug: (message, fields) => {
+            log.debug(message, fields);
+          },
+        });
         cacheBreak = cacheObservabilityEnabled
           ? completePromptCacheObservation({
               sessionId: params.sessionId,

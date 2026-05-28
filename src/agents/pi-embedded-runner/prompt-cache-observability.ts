@@ -39,6 +39,15 @@ export type PromptCacheBreak = {
   changes: PromptCacheChange[] | null;
 };
 
+export type GeminiImplicitCacheTelemetry = {
+  provider: string;
+  modelId: string;
+  inputTokens: number;
+  cachedReadTokens: number;
+  cacheHitRatio: number;
+  sessionKey: string;
+};
+
 type PromptCacheTracker = {
   snapshot: PromptCacheSnapshot;
   lastCacheRead: number | null;
@@ -131,6 +140,43 @@ function diffSnapshots(
 
 export function collectPromptCacheToolNames(tools: Array<{ name?: string }>): string[] {
   return tools.map((tool) => tool.name?.trim()).filter((name): name is string => Boolean(name));
+}
+
+export function emitGeminiImplicitCacheTelemetry(params: {
+  provider: string;
+  modelId: string;
+  usage?: NormalizedUsage;
+  sessionKey: string;
+  debug: (message: string, fields: GeminiImplicitCacheTelemetry) => void;
+}): GeminiImplicitCacheTelemetry | null {
+  if (params.provider !== "openrouter") {
+    return null;
+  }
+  if (!params.modelId.toLowerCase().includes("google/gemini")) {
+    return null;
+  }
+
+  const inputTokens = params.usage?.input;
+  if (typeof inputTokens !== "number" || !Number.isFinite(inputTokens) || inputTokens <= 0) {
+    return null;
+  }
+
+  const cachedReadTokensRaw = params.usage?.cacheRead;
+  const cachedReadTokens =
+    typeof cachedReadTokensRaw === "number" && Number.isFinite(cachedReadTokensRaw)
+      ? cachedReadTokensRaw
+      : 0;
+  const cacheHitRatio = cachedReadTokens / inputTokens;
+  const telemetry: GeminiImplicitCacheTelemetry = {
+    provider: params.provider,
+    modelId: params.modelId,
+    inputTokens,
+    cachedReadTokens,
+    cacheHitRatio,
+    sessionKey: params.sessionKey,
+  };
+  params.debug("gemini implicit prompt-cache telemetry", telemetry);
+  return telemetry;
 }
 
 export function beginPromptCacheObservation(params: {
