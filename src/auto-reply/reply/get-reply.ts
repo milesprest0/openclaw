@@ -43,7 +43,10 @@ import { hasInboundMedia } from "./inbound-media.js";
 import { emitPreAgentMessageHooks } from "./message-preprocess-hooks.js";
 import { createFastTestModelSelectionState } from "./model-selection.js";
 import { initSessionState } from "./session.js";
-import { resolveStoredModelOverride } from "./stored-model-override.js";
+import {
+  resolveStoredModelOverride,
+  isModelOverrideStillAuthoritative,
+} from "./stored-model-override.js";
 import { createTypingController } from "./typing.js";
 
 type ResetCommandAction = "new" | "reset";
@@ -432,10 +435,12 @@ export async function getReplyFromConfig(
         parentSessionKey: sessionCtx.ModelParentSessionKey ?? sessionCtx.ParentSessionKey,
       })
     : null;
-  const hasSessionModelOverride = Boolean(
-    normalizeOptionalString(sessionEntry.modelOverride) ||
-    normalizeOptionalString(sessionEntry.providerOverride),
-  );
+  const hasSessionModelOverride =
+    isModelOverrideStillAuthoritative({
+      modelOverride: sessionEntry.modelOverride,
+      modelOverrideSource: sessionEntry.modelOverrideSource,
+      modelOverrideAt: sessionEntry.modelOverrideAt,
+    }) || Boolean(normalizeOptionalString(sessionEntry.providerOverride));
   const storedModelOverride = resolveStoredModelOverride({
     sessionEntry,
     sessionStore,

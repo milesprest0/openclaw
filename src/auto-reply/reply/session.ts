@@ -306,6 +306,7 @@ export async function initSessionState(params: {
   let persistedModelOverride: string | undefined;
   let persistedProviderOverride: string | undefined;
   let persistedModelOverrideSource: SessionEntry["modelOverrideSource"];
+  let persistedModelOverrideAt: number | undefined;
   let persistedAuthProfileOverride: string | undefined;
   let persistedAuthProfileOverrideSource: SessionEntry["authProfileOverrideSource"];
   let persistedAuthProfileOverrideCompactionCount: number | undefined;
@@ -498,6 +499,7 @@ export async function initSessionState(params: {
     persistedModelOverride = entry.modelOverride;
     persistedProviderOverride = entry.providerOverride;
     persistedModelOverrideSource = entry.modelOverrideSource;
+    persistedModelOverrideAt = entry.modelOverrideAt;
     persistedAuthProfileOverride = entry.authProfileOverride;
     persistedAuthProfileOverrideSource = entry.authProfileOverrideSource;
     persistedAuthProfileOverrideCompactionCount = entry.authProfileOverrideCompactionCount;
@@ -525,6 +527,11 @@ export async function initSessionState(params: {
       persistedModelOverride = preservedSelection.modelOverride;
       persistedProviderOverride = preservedSelection.providerOverride;
       persistedModelOverrideSource = preservedSelection.modelOverrideSource;
+      // Reset preserves only user overrides; their timestamp carries over so
+      // the (non-expiring) user pin is unaffected by the auto-pin TTL.
+      persistedModelOverrideAt = preservedSelection.modelOverride
+        ? entry.modelOverrideAt
+        : undefined;
       persistedAuthProfileOverride = preservedSelection.authProfileOverride;
       persistedAuthProfileOverrideSource = preservedSelection.authProfileOverrideSource;
       persistedAuthProfileOverrideCompactionCount =
@@ -643,6 +650,7 @@ export async function initSessionState(params: {
     modelOverride: persistedModelOverride ?? baseEntry?.modelOverride,
     providerOverride: persistedProviderOverride ?? baseEntry?.providerOverride,
     modelOverrideSource: persistedModelOverrideSource ?? baseEntry?.modelOverrideSource,
+    modelOverrideAt: persistedModelOverrideAt ?? baseEntry?.modelOverrideAt,
     authProfileOverride: persistedAuthProfileOverride ?? baseEntry?.authProfileOverride,
     authProfileOverrideSource:
       persistedAuthProfileOverrideSource ?? baseEntry?.authProfileOverrideSource,

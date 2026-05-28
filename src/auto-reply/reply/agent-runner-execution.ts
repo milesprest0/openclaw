@@ -159,6 +159,9 @@ function setFallbackSelectionStateField(
     case "modelOverride":
       if (entry.modelOverride !== value) {
         entry.modelOverride = value as SessionEntry["modelOverride"];
+        // Stamp when this override was written so stale auto pins can expire
+        // and the session re-resolves the live configured default.
+        entry.modelOverrideAt = Date.now();
         return true;
       }
       return false;

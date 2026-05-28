@@ -3,6 +3,7 @@ import { isDirectiveOnly } from "./directive-handling.directive-only.js";
 import { handleDirectiveOnly } from "./directive-handling.impl.js";
 import { resolveCurrentDirectiveLevels } from "./directive-handling.levels.js";
 import type { ApplyInlineDirectivesFastLaneParams } from "./directive-handling.params.js";
+import { isModelOverrideStillAuthoritative } from "./stored-model-override.js";
 
 export async function applyInlineDirectivesFastLane(
   params: ApplyInlineDirectivesFastLaneParams,
@@ -99,7 +100,14 @@ export async function applyInlineDirectivesFastLane(
   if (sessionEntry?.providerOverride) {
     provider = sessionEntry.providerOverride;
   }
-  if (sessionEntry?.modelOverride) {
+  if (
+    sessionEntry?.modelOverride &&
+    isModelOverrideStillAuthoritative({
+      modelOverride: sessionEntry.modelOverride,
+      modelOverrideSource: sessionEntry.modelOverrideSource,
+      modelOverrideAt: sessionEntry.modelOverrideAt,
+    })
+  ) {
     model = sessionEntry.modelOverride;
   }
 
