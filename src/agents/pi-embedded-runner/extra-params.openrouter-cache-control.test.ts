@@ -7,6 +7,7 @@ type StreamPayload = {
     role: string;
     content: unknown;
   }>;
+  tools?: Array<Record<string, unknown>>;
 };
 
 function runOpenRouterPayload(
@@ -202,6 +203,64 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
       { type: "text", text: "Stable", cache_control: { type: "ephemeral", ttl: "1h" } },
       { type: "text", text: "Volatile" },
     ]);
+  });
+
+  it("Phase 3: marks the last tool definition for tool-block caching", () => {
+    const payload: StreamPayload = {
+      messages: [
+        { role: "system", content: "You are a tool user." },
+        { role: "user", content: "Hi" },
+      ],
+      tools: [
+        { type: "function", function: { name: "alpha" } },
+        { type: "function", function: { name: "beta" } },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest");
+
+    expect(payload.tools?.[0]).toEqual({ type: "function", function: { name: "alpha" } });
+    expect(payload.tools?.[1]).toEqual({
+      type: "function",
+      function: { name: "beta" },
+      cache_control: { type: "ephemeral" },
+    });
+  });
+
+  it("Phase 3: clears stray markers on non-final tools (exactly one breakpoint)", () => {
+    const payload: StreamPayload = {
+      messages: [{ role: "system", content: "sys" }],
+      tools: [
+        { type: "function", function: { name: "alpha" }, cache_control: { type: "ephemeral" } },
+        { type: "function", function: { name: "beta" } },
+        { type: "function", function: { name: "gamma" } },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest");
+
+    expect(payload.tools?.[0]).not.toHaveProperty("cache_control");
+    expect(payload.tools?.[1]).not.toHaveProperty("cache_control");
+    expect(payload.tools?.[2]).toHaveProperty("cache_control", { type: "ephemeral" });
+  });
+
+  it("Phase 3: tool marker honors long TTL", () => {
+    const payload: StreamPayload = {
+      messages: [{ role: "system", content: "sys" }],
+      tools: [{ type: "function", function: { name: "alpha" } }],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest", { cacheRetention: "long" });
+
+    expect(payload.tools?.[0]).toHaveProperty("cache_control", { type: "ephemeral", ttl: "1h" });
+  });
+
+  it("Phase 3: no tools array is a no-op", () => {
+    const payload: StreamPayload = {
+      messages: [{ role: "system", content: "sys" }],
+    };
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest");
+    expect(payload.tools).toBeUndefined();
   });
 
   it("does not inject cache_control for OpenRouter non-Anthropic models", () => {

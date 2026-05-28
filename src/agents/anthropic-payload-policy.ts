@@ -307,6 +307,40 @@ function splitSystemContentOnCacheBoundary(
   return blocks.length > 0 ? blocks : undefined;
 }
 
+/**
+ * Phase 3 (multi-breakpoint): cache the tool-definitions block by placing a
+ * cache_control marker on the LAST tool. In Anthropic's cache hierarchy
+ * (tools -> system -> messages), this caches the large, stable tool schema
+ * independently of system/conversation churn, and survives even when the
+ * system suffix or message tail changes. Verified live on OpenRouter:
+ * marking the last OpenAI-format tool produced a tools+system cache hit
+ * (~90% read discount). Handles both OpenAI-completions tool shape
+ * ({ type:"function", function:{...} }) and Anthropic-native ({ name, ... }).
+ * Idempotent: only the last tool carries the marker; earlier tools are
+ * cleaned to avoid exceeding Anthropic's 4-breakpoint budget. (2026-05-28)
+ */
+function applyToolDefinitionsCacheControl(
+  payloadObj: Record<string, unknown>,
+  cacheControl: AnthropicEphemeralCacheControl,
+): void {
+  const tools = payloadObj.tools;
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return;
+  }
+  // Clear any stray markers on non-final tools so we contribute exactly ONE
+  // breakpoint (the tools-block boundary).
+  for (let i = 0; i < tools.length - 1; i++) {
+    const tool = tools[i];
+    if (tool && typeof tool === "object") {
+      delete (tool as Record<string, unknown>).cache_control;
+    }
+  }
+  const last = tools[tools.length - 1];
+  if (last && typeof last === "object") {
+    (last as Record<string, unknown>).cache_control = cacheControl;
+  }
+}
+
 export function applyAnthropicEphemeralCacheControlMarkers(
   payloadObj: Record<string, unknown>,
   options?: AnthropicEphemeralCacheMarkerOptions,
@@ -317,6 +351,9 @@ export function applyAnthropicEphemeralCacheControlMarkers(
   }
 
   const cacheControl = buildEphemeralCacheControl(options);
+
+  // Phase 3: cache the stable tool-definitions block (one breakpoint).
+  applyToolDefinitionsCacheControl(payloadObj, cacheControl);
 
   for (const message of messages as Array<{ role?: string; content?: unknown }>) {
     if (message.role === "system" || message.role === "developer") {
