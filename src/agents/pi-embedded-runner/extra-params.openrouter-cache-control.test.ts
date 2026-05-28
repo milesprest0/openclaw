@@ -43,6 +43,26 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
     expect(payload.messages[1].content).toBe("Hello");
   });
 
+  it("injects cache_control for OpenRouter always-latest tilde alias (~anthropic/...)", () => {
+    // Regression: migrating the pin to OpenRouter's always-latest alias
+    // "~anthropic/claude-opus-latest" must NOT disable prompt caching. The
+    // leading tilde is OpenRouter's floor/always-latest routing selector and
+    // is sent verbatim, but the Anthropic family must still be recognized.
+    const payload = {
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest");
+
+    expect(payload.messages[0].content).toEqual([
+      { type: "text", text: "You are a helpful assistant.", cache_control: { type: "ephemeral" } },
+    ]);
+    expect(payload.messages[1].content).toBe("Hello");
+  });
+
   it("adds cache_control to last content block when system message is already array", () => {
     const payload = {
       messages: [

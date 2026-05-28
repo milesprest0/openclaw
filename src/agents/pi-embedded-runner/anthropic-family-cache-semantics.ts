@@ -9,7 +9,15 @@ type AnthropicCacheRetentionFamily =
   | "custom-anthropic-api";
 
 export function isAnthropicModelRef(modelId: string): boolean {
-  return normalizeLowercaseStringOrEmpty(modelId).startsWith("anthropic/");
+  // Tolerate OpenRouter's always-latest routing prefix `~` (e.g.
+  // "~anthropic/claude-opus-latest"). The leading tilde is OpenRouter's
+  // floor/always-latest selector and is sent verbatim in the model field,
+  // but it must not hide the Anthropic family from prompt-cache marker
+  // injection and cache-TTL eligibility. Without this strip, migrating a
+  // pin from "anthropic/claude-opus-4-7" to "~anthropic/claude-opus-latest"
+  // silently disables explicit cache_control breakpoints. (2026-05-28)
+  const normalized = normalizeLowercaseStringOrEmpty(modelId).replace(/^~/, "");
+  return normalized.startsWith("anthropic/");
 }
 
 /** Matches Application Inference Profile ARNs across all AWS partitions with Bedrock. */
