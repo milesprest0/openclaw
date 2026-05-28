@@ -150,8 +150,44 @@ function normalizeProxyReasoningPayload(payload: unknown, thinkingLevel?: ThinkL
   }
 }
 
-export function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
+export type OpenRouterSystemCacheWrapperOptions = {
+  /**
+   * Cache retention for the OpenRouter Anthropic cache markers (Phase 2, TTL
+   * alignment). "long" emits ttl:"1h" markers (best for high-prefix,
+   * long-session surfaces); "none" disables marker injection entirely; the
+   * default (undefined/"short") keeps the conservative 5m ephemeral marker.
+   * Resolved per-surface; never implicitly upgraded.
+   */
+  cacheRetention?: "none" | "short" | "long";
+};
+
+/**
+ * Resolve the OpenRouter cache retention from explicit config first, then the
+ * PI_CACHE_RETENTION env (matching the Anthropic-direct path), defaulting to
+ * short. Kept conservative: only an explicit "long" produces a 1h TTL.
+ */
+function resolveOpenRouterCacheRetention(
+  options?: OpenRouterSystemCacheWrapperOptions,
+): "none" | "short" | "long" {
+  if (options?.cacheRetention === "none") {
+    return "none";
+  }
+  if (options?.cacheRetention === "long") {
+    return "long";
+  }
+  if (options?.cacheRetention === "short") {
+    return "short";
+  }
+  return process.env.PI_CACHE_RETENTION === "long" ? "long" : "short";
+}
+
+export function createOpenRouterSystemCacheWrapper(
+  baseStreamFn: StreamFn | undefined,
+  wrapperOptions?: OpenRouterSystemCacheWrapperOptions,
+): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
+  const retention = resolveOpenRouterCacheRetention(wrapperOptions);
+  const markerOptions = retention === "long" ? ({ ttl: "1h" } as const) : undefined;
   return (model, context, options) => {
     const provider = readStringValue(model.provider);
     const modelId = readStringValue(model.id);
@@ -165,6 +201,7 @@ export function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | unde
       transport: "stream",
     }).endpointClass;
     if (
+      retention === "none" ||
       !modelId ||
       !isAnthropicModelRef(modelId) ||
       !(
@@ -176,7 +213,7 @@ export function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | unde
     }
 
     return streamWithPayloadPatch(underlying, model, context, options, (payloadObj) => {
-      applyAnthropicEphemeralCacheControlMarkers(payloadObj);
+      applyAnthropicEphemeralCacheControlMarkers(payloadObj, markerOptions);
     });
   };
 }

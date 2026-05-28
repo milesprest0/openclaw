@@ -9,12 +9,16 @@ type StreamPayload = {
   }>;
 };
 
-function runOpenRouterPayload(payload: StreamPayload, modelId: string) {
+function runOpenRouterPayload(
+  payload: StreamPayload,
+  modelId: string,
+  wrapperOptions?: { cacheRetention?: "none" | "short" | "long" },
+) {
   const baseStreamFn: StreamFn = (model, _context, options) => {
     options?.onPayload?.(payload, model);
     return {} as ReturnType<StreamFn>;
   };
-  const streamFn = createOpenRouterSystemCacheWrapper(baseStreamFn);
+  const streamFn = createOpenRouterSystemCacheWrapper(baseStreamFn, wrapperOptions);
   void streamFn(
     {
       api: "openai-completions",
@@ -139,6 +143,65 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
       text: "Part 2\ntail",
       cache_control: { type: "ephemeral" },
     });
+  });
+
+  it("Phase 2: emits ttl:1h markers when cacheRetention is long", () => {
+    const payload = {
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest", { cacheRetention: "long" });
+
+    expect(payload.messages[0].content).toEqual([
+      {
+        type: "text",
+        text: "You are a helpful assistant.",
+        cache_control: { type: "ephemeral", ttl: "1h" },
+      },
+    ]);
+  });
+
+  it("Phase 2: keeps bare 5m ephemeral markers when cacheRetention is short", () => {
+    const payload = {
+      messages: [{ role: "system", content: "You are a helpful assistant." }],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest", { cacheRetention: "short" });
+
+    expect(payload.messages[0].content).toEqual([
+      { type: "text", text: "You are a helpful assistant.", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("Phase 2: cacheRetention none disables marker injection entirely", () => {
+    const payload = {
+      messages: [{ role: "system", content: "You are a helpful assistant." }],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest", { cacheRetention: "none" });
+
+    // Untouched: still a plain string, no cache markers.
+    expect(payload.messages[0].content).toBe("You are a helpful assistant.");
+  });
+
+  it("Phase 2: long TTL composes with the boundary split", () => {
+    const boundary = "\n<!-- OPENCLAW_CACHE_BOUNDARY -->\n";
+    const payload = {
+      messages: [
+        { role: "system", content: `Stable${boundary}Volatile` },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest", { cacheRetention: "long" });
+
+    expect(payload.messages[0].content).toEqual([
+      { type: "text", text: "Stable", cache_control: { type: "ephemeral", ttl: "1h" } },
+      { type: "text", text: "Volatile" },
+    ]);
   });
 
   it("does not inject cache_control for OpenRouter non-Anthropic models", () => {

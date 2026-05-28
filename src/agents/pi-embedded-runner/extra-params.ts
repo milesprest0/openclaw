@@ -687,10 +687,28 @@ function applyPrePluginStreamWrappers(ctx: ApplyExtraParamsContext): void {
   }
 }
 
+/**
+ * Narrow an arbitrary extraParams.cacheRetention value to the supported union
+ * for the OpenRouter cache wrapper. Returns undefined for anything else so the
+ * wrapper applies its conservative env/short default. (Phase 2, 2026-05-28)
+ */
+function normalizeExplicitCacheRetention(value: unknown): "none" | "short" | "long" | undefined {
+  return value === "none" || value === "short" || value === "long" ? value : undefined;
+}
+
 function applyPostPluginStreamWrappers(
   ctx: ApplyExtraParamsContext & { providerWrapperHandled: boolean },
 ): void {
-  ctx.agent.streamFn = createOpenRouterSystemCacheWrapper(ctx.agent.streamFn);
+  ctx.agent.streamFn = createOpenRouterSystemCacheWrapper(ctx.agent.streamFn, {
+    // Phase 2 (TTL alignment): thread the explicit cache retention into the
+    // OpenRouter marker wrapper so high-prefix / long-session surfaces can opt
+    // into a 1h TTL via cacheRetention:"long" (or PI_CACHE_RETENTION), while the
+    // conservative default stays at the 5m ephemeral marker. NOTE: the shared
+    // resolveCacheRetention() is family-gated and returns undefined for the
+    // OpenRouter route (provider=openrouter, api=openai-completions), so we
+    // read the explicit value directly here; the wrapper falls back to env/short.
+    cacheRetention: normalizeExplicitCacheRetention(ctx.effectiveExtraParams?.cacheRetention),
+  });
   ctx.agent.streamFn = createOpenAIStringContentWrapper(ctx.agent.streamFn);
   ctx.agent.streamFn = createOpenAICompletionsToolsCompatWrapper(ctx.agent.streamFn);
 
