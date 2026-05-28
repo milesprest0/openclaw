@@ -54,7 +54,12 @@ const CONTEXT_FILE_ORDER = new Map<string, number>([
   ["memory.md", 70],
 ]);
 
-const DYNAMIC_CONTEXT_FILE_BASENAMES = new Set(["heartbeat.md"]);
+// Files classified as dynamic land BELOW the cache boundary (uncached suffix).
+// MEMORY.md churns daily (memory-dreaming cron, promotions, rolling session
+// logs); keeping it in the cached stable prefix means every memory edit busts
+// the large identity/tools prefix. Classifying it dynamic preserves the cache
+// hit on the stable identity/rules/tools prefix above the boundary. (2026-05-28)
+const DYNAMIC_CONTEXT_FILE_BASENAMES = new Set(["heartbeat.md", "memory.md"]);
 const DEFAULT_HEARTBEAT_PROMPT_CONTEXT_BLOCK =
   "Default heartbeat prompt:\n`Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.`";
 const SYSTEM_PROMPT_STABLE_PREFIX_CACHE_LIMIT = 64;

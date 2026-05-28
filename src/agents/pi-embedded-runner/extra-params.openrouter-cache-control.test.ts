@@ -87,6 +87,60 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
     });
   });
 
+  it("splits system content on OPENCLAW_CACHE_BOUNDARY: stable prefix cached, dynamic suffix not", () => {
+    // Phase 1 (2026-05-28): the OpenRouter path must honor the cache boundary
+    // so the volatile suffix (e.g. MEMORY.md / HEARTBEAT.md churn) below the
+    // boundary does not invalidate the large stable identity/tools prefix.
+    const boundary = "\n<!-- OPENCLAW_CACHE_BOUNDARY -->\n";
+    const payload = {
+      messages: [
+        {
+          role: "system",
+          content: `Stable identity and tools prefix${boundary}Volatile MEMORY suffix`,
+        },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-opus-latest");
+
+    expect(payload.messages[0].content).toEqual([
+      {
+        type: "text",
+        text: "Stable identity and tools prefix",
+        cache_control: { type: "ephemeral" },
+      },
+      { type: "text", text: "Volatile MEMORY suffix" },
+    ]);
+    expect(payload.messages[1].content).toBe("Hello");
+  });
+
+  it("strips an inert boundary marker from multi-block system content", () => {
+    const boundary = "\n<!-- OPENCLAW_CACHE_BOUNDARY -->\n";
+    const payload = {
+      messages: [
+        {
+          role: "system",
+          content: [
+            { type: "text", text: "Part 1" },
+            { type: "text", text: `Part 2${boundary}tail` },
+          ],
+        },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "anthropic/claude-opus-4-6");
+
+    const content = payload.messages[0].content as Array<Record<string, unknown>>;
+    expect(content[0]).toEqual({ type: "text", text: "Part 1" });
+    // boundary collapsed to a newline; last block still gets the marker
+    expect(content[1]).toEqual({
+      type: "text",
+      text: "Part 2\ntail",
+      cache_control: { type: "ephemeral" },
+    });
+  });
+
   it("does not inject cache_control for OpenRouter non-Anthropic models", () => {
     const payload = {
       messages: [{ role: "system", content: "You are a helpful assistant." }],

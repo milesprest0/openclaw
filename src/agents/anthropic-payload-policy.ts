@@ -223,28 +223,130 @@ export function applyAnthropicPayloadPolicyToParams(
   applyAnthropicCacheControlToMessages(payloadObj.messages, policy.cacheControl);
 }
 
+export type AnthropicEphemeralCacheMarkerOptions = {
+  /**
+   * When "1h", emit a long-retention ephemeral cache marker
+   * ({ type: "ephemeral", ttl: "1h" }). Defaults to the short (5m) ephemeral
+   * marker. Phase 2 (TTL alignment) threads this in per-surface; callers that
+   * pass nothing keep the conservative 5m default.
+   */
+  ttl?: "1h";
+};
+
+/**
+ * Build the ephemeral cache_control value for the OpenRouter marker path.
+ * Short (5m) by default; long (1h) only when explicitly requested.
+ */
+function buildEphemeralCacheControl(
+  options?: AnthropicEphemeralCacheMarkerOptions,
+): AnthropicEphemeralCacheControl {
+  return options?.ttl === "1h" ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" };
+}
+
+/**
+ * Honor the `<!-- OPENCLAW_CACHE_BOUNDARY -->` split for an OpenRouter
+ * system/developer text payload. Given the message content (string or array),
+ * if a boundary marker is present in a single text block, returns a 2-block
+ * array: a cached stable-prefix block carrying cache_control, followed by an
+ * uncached dynamic-suffix block (boundary stripped from both). Returns
+ * undefined when no boundary split applies (caller falls back to legacy
+ * last-block marking). This mirrors the Anthropic-direct boundary behavior so
+ * daily-churn context (MEMORY.md, etc.) below the boundary stops invalidating
+ * the large stable identity/tools prefix above it. (2026-05-28, Phase 1)
+ */
+function splitSystemContentOnCacheBoundary(
+  content: unknown,
+  cacheControl: AnthropicEphemeralCacheControl,
+): Array<Record<string, unknown>> | undefined {
+  let text: string | undefined;
+  let baseRecord: Record<string, unknown> | undefined;
+
+  if (typeof content === "string") {
+    text = content;
+    baseRecord = { type: "text" };
+  } else if (Array.isArray(content) && content.length === 1) {
+    const only = content[0];
+    if (only && typeof only === "object") {
+      const record = only as Record<string, unknown>;
+      if (record.type === "text" && typeof record.text === "string") {
+        text = record.text;
+        const { cache_control: _drop, text: _t, ...rest } = record;
+        baseRecord = { ...rest, type: "text" };
+      }
+    }
+  }
+
+  if (text === undefined || baseRecord === undefined) {
+    return undefined;
+  }
+
+  const split = splitSystemPromptCacheBoundary(text);
+  if (!split) {
+    return undefined;
+  }
+
+  const blocks: Array<Record<string, unknown>> = [];
+  if (split.stablePrefix) {
+    blocks.push({
+      ...baseRecord,
+      text: stripSystemPromptCacheBoundary(split.stablePrefix),
+      cache_control: cacheControl,
+    });
+  }
+  if (split.dynamicSuffix) {
+    blocks.push({
+      ...baseRecord,
+      text: stripSystemPromptCacheBoundary(split.dynamicSuffix),
+    });
+  }
+  // Degenerate case: boundary present but no stable prefix — still cache the
+  // suffix so we don't silently disable caching.
+  if (blocks.length === 1 && !split.stablePrefix) {
+    blocks[0].cache_control = cacheControl;
+  }
+  return blocks.length > 0 ? blocks : undefined;
+}
+
 export function applyAnthropicEphemeralCacheControlMarkers(
   payloadObj: Record<string, unknown>,
+  options?: AnthropicEphemeralCacheMarkerOptions,
 ): void {
   const messages = payloadObj.messages;
   if (!Array.isArray(messages)) {
     return;
   }
 
+  const cacheControl = buildEphemeralCacheControl(options);
+
   for (const message of messages as Array<{ role?: string; content?: unknown }>) {
     if (message.role === "system" || message.role === "developer") {
+      // Phase 1: honor the OPENCLAW_CACHE_BOUNDARY split when present so the
+      // volatile suffix (below the boundary) does not bust the stable prefix.
+      const splitBlocks = splitSystemContentOnCacheBoundary(message.content, cacheControl);
+      if (splitBlocks) {
+        message.content = splitBlocks;
+        continue;
+      }
       if (typeof message.content === "string") {
-        message.content = [
-          { type: "text", text: message.content, cache_control: { type: "ephemeral" } },
-        ];
+        message.content = [{ type: "text", text: message.content, cache_control: cacheControl }];
         continue;
       }
       if (Array.isArray(message.content) && message.content.length > 0) {
+        // Strip any inert boundary marker text from multi-block system content
+        // so it never leaks into the model prompt.
+        for (const block of message.content) {
+          if (block && typeof block === "object") {
+            const record = block as Record<string, unknown>;
+            if (record.type === "text" && typeof record.text === "string") {
+              record.text = stripSystemPromptCacheBoundary(record.text);
+            }
+          }
+        }
         const last = message.content[message.content.length - 1];
         if (last && typeof last === "object") {
           const record = last as Record<string, unknown>;
           if (record.type !== "thinking" && record.type !== "redacted_thinking") {
-            record.cache_control = { type: "ephemeral" };
+            record.cache_control = cacheControl;
           }
         }
       }
