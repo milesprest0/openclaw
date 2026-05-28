@@ -2041,9 +2041,11 @@ export function buildOpenAICompletionsParams(
           : stripSystemPromptCacheBoundary(context.systemPrompt),
       }
     : context;
-  const messages = convertMessages(model as never, completionsContext, compat as never) as Array<
-    Record<string, unknown>
-  >;
+  const messages = convertMessages(
+    model as never,
+    completionsContext,
+    compat as never,
+  ) as unknown as Array<Record<string, unknown>>;
   if (openRouterGeminiPromptSplit) {
     injectOpenRouterGeminiDynamicSystemSuffix(messages, openRouterGeminiPromptSplit.dynamicSuffix);
   }

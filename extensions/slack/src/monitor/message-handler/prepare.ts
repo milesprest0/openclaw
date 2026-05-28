@@ -77,14 +77,11 @@ function auditSlackIngress(
   phase: "received" | "mention_decision" | "skipped" | "prepared" | "dropped",
   fields: Record<string, unknown>,
 ): void {
-  ingressAuditLog.info(
-    {
-      event: "slack_ingress_audit",
-      phase,
-      ...fields,
-    },
-    `slack ingress audit: phase=${phase}`,
-  );
+  ingressAuditLog.info(`slack ingress audit: phase=${phase}`, {
+    event: "slack_ingress_audit",
+    phase,
+    ...fields,
+  });
 }
 
 function resolveCachedMentionRegexes(
