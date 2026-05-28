@@ -71,6 +71,39 @@ function normalizeModelRef(
   };
 }
 
+/**
+ * An always-latest alias is a model selection whose intent is "track the
+ * newest model in this family forward forever" — e.g. `~anthropic/claude-opus-latest`
+ * or any ref ending in `-latest`. The leading `~` sigil and the `-latest`
+ * suffix are the two canonical always-latest markers used across the runtime
+ * (see anthropic-family-cache-semantics.ts, which strips the `~` before
+ * family detection).
+ *
+ * This matters for runtime-model resume: the per-turn writer records the
+ * RESOLVED CONCRETE model id (e.g. `anthropic/claude-opus-4-7`) into
+ * `sessionEntry.model` for usage attribution. On the next turn that recorded
+ * concrete id would normally become the "active" model and shadow the
+ * configured selection. If the configured selection is an always-latest
+ * alias, letting a stale concrete snapshot win defeats the entire point of
+ * the alias — the session gets pinned to whatever "latest" happened to be on
+ * the day it was created and never moves forward, even after the fleet bumps
+ * to a newer model. (Observed 2026-05-28: pre-migration sessions kept
+ * replaying claude-opus-4-7 for days after the alias migration, silently
+ * billing the retired model.)
+ */
+function isAlwaysLatestAliasRef(providerRaw: string, modelRaw: string): boolean {
+  const provider = normalizeLowercaseStringOrEmpty(providerRaw);
+  const model = normalizeLowercaseStringOrEmpty(modelRaw);
+  // The `~` sigil can appear on the provider segment (`~anthropic`) or be
+  // embedded in a combined ref (`openrouter/~anthropic/...`).
+  if (provider.startsWith("~") || model.startsWith("~") || model.includes("/~")) {
+    return true;
+  }
+  // `-latest` suffix on the model id (after stripping any provider prefix).
+  const lastSegment = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
+  return lastSegment.endsWith("-latest") || lastSegment === "latest";
+}
+
 export function resolveSelectedAndActiveModel(params: {
   selectedProvider: string;
   selectedModel: string;
@@ -84,9 +117,21 @@ export function resolveSelectedAndActiveModel(params: {
   const runtimeModel = normalizeOptionalString(params.sessionEntry?.model);
   const runtimeProvider = normalizeOptionalString(params.sessionEntry?.modelProvider);
 
-  const active = runtimeModel
-    ? normalizeModelRef(runtimeModel, runtimeProvider || selected.provider, !runtimeProvider)
-    : selected;
+  // Always-latest guard: when the configured selection is an always-latest
+  // alias, a previously recorded CONCRETE runtime model must not shadow it.
+  // Honor the alias so "latest" keeps tracking forward instead of pinning the
+  // session to a stale snapshot. The recorded concrete id remains untouched on
+  // disk for historical usage attribution; it just no longer overrides the
+  // alias selection at resume time.
+  const selectedIsAlwaysLatest = isAlwaysLatestAliasRef(
+    params.selectedProvider,
+    params.selectedModel,
+  );
+
+  const active =
+    runtimeModel && !selectedIsAlwaysLatest
+      ? normalizeModelRef(runtimeModel, runtimeProvider || selected.provider, !runtimeProvider)
+      : selected;
   const activeDiffers = active.provider !== selected.provider || active.model !== selected.model;
 
   return {
