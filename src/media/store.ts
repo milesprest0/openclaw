@@ -14,6 +14,7 @@ import { resolvePinnedHostname } from "../infra/net/ssrf.js";
 import { writeSiblingTempFile } from "../infra/sibling-temp-file.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { resolveConfigDir } from "../utils.js";
+import { pinnedInboundIds } from "./inbound-retention.js";
 import { detectMime, extensionForMime } from "./mime.js";
 import { isFsSafeError, readLocalFileSafely, type FsSafeLikeError } from "./store.runtime.js";
 
@@ -184,7 +185,43 @@ async function retryAfterRecreatingDir<T>(dir: string, run: () => Promise<T>): P
   }
 }
 
+/**
+ * Refresh the mtime of every currently-pinned inbound media file to `now` so
+ * the age-based prune walk below cannot reclaim a file that belongs to an
+ * in-flight (or recently failed, within its grace window) turn. This is the
+ * enforcement point for the inbound-retention registry: pinning is a no-op
+ * unless the sweep honors it, and bumping mtime immediately before the walk is
+ * race-safe (the file is younger than any TTL when the walk inspects it).
+ *
+ * Fail-open: missing files / touch errors are ignored. Expired pins are not
+ * returned by `pinnedInboundIds`, so abandoned media still ages out normally.
+ */
+async function refreshPinnedInboundMtimes(now: number): Promise<void> {
+  const ids = pinnedInboundIds(now);
+  if (ids.length === 0) {
+    return;
+  }
+  const when = new Date(now);
+  await Promise.allSettled(
+    ids.map(async (id) => {
+      let relativePath: string;
+      try {
+        relativePath = resolveMediaRelativePath(id, "inbound", "refreshPinnedInboundMtimes");
+      } catch {
+        return; // unsafe/garbage id: skip
+      }
+      const filePath = path.join(resolveMediaDir(), relativePath);
+      try {
+        await fs.utimes(filePath, when, when);
+      } catch {
+        // File may already be gone or unreadable; nothing to protect.
+      }
+    }),
+  );
+}
+
 export async function cleanOldMedia(ttlMs = DEFAULT_TTL_MS, options: CleanOldMediaOptions = {}) {
+  await refreshPinnedInboundMtimes(Date.now());
   await openMediaStore().pruneExpired({
     maxDepth: options.recursive ? undefined : 1,
     ttlMs,
