@@ -898,7 +898,8 @@ export async function runEmbeddedPiAgent(
         );
         params.logFallbackDecision("fallback_model", { status });
         throw new FailoverError(
-          "The AI service is temporarily rate-limited. Please try again in a moment.",
+          "The service is temporarily at capacity (rate-limited). Your uploaded files and " +
+            "request have been saved — please try again in a moment.",
           {
             reason: "rate_limit",
             provider: params.failoverProvider,
@@ -1293,6 +1294,8 @@ export async function runEmbeddedPiAgent(
             currentAttemptAssistant,
           } = attempt;
           const timedOutDuringToolExecution = attempt.timedOutDuringToolExecution ?? false;
+          const timedOutDuringReadOnlyToolExecution =
+            attempt.timedOutDuringReadOnlyToolExecution ?? false;
           if (sessionIdUsed && sessionIdUsed !== activeSessionId) {
             activeSessionId = sessionIdUsed;
           }
@@ -2224,6 +2227,7 @@ export async function runEmbeddedPiAgent(
             timedOut,
             timedOutDuringCompaction,
             timedOutDuringToolExecution,
+            timedOutDuringReadOnlyToolExecution,
             profileRotated: false,
           });
           const assistantFailoverOutcome = await handleAssistantFailover({
@@ -2237,6 +2241,7 @@ export async function runEmbeddedPiAgent(
             idleTimedOut,
             timedOutDuringCompaction,
             timedOutDuringToolExecution,
+            timedOutDuringReadOnlyToolExecution,
             allowSameModelIdleTimeoutRetry:
               timedOut &&
               idleTimedOut &&
@@ -2394,10 +2399,14 @@ export async function runEmbeddedPiAgent(
             (!payloadsWithToolMedia?.length || hasPartialAssistantTextAfterPromptTimeout)
           ) {
             const timeoutText = idleTimedOut
-              ? "The model did not produce a response before the model idle timeout. " +
-                "Please try again, or increase `models.providers.<id>.timeoutSeconds` for slow local or self-hosted providers."
-              : "Request timed out before a response was generated. " +
-                "Please try again, or increase `agents.defaults.timeoutSeconds` in your config.";
+              ? "The service is taking longer than expected and timed out before a response " +
+                "was ready. Your uploaded files and request have been saved — please try " +
+                "again. (Operators: increase `models.providers.<id>.timeoutSeconds` for slow " +
+                "local or self-hosted providers.)"
+              : "The service is temporarily unavailable and the request timed out before a " +
+                "response was ready. Your uploaded files and request have been saved — please " +
+                "try again in a moment. (Operators: increase `agents.defaults.timeoutSeconds` " +
+                "in your config for long multi-document turns.)";
             const replayInvalid = resolveReplayInvalidForAttempt(null);
             const livenessState = resolveRunLivenessState({
               payloadCount: hasPartialAssistantTextAfterPromptTimeout ? 0 : payloads.length,

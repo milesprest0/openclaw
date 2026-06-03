@@ -63,6 +63,13 @@ export type EmbeddedRunAttemptResult = {
   timedOutDuringCompaction: boolean;
   /** Optional because this type is re-exported as `AgentHarnessAttemptResult`. */
   timedOutDuringToolExecution?: boolean;
+  /**
+   * True only when `timedOutDuringToolExecution` is true AND every in-flight
+   * tool at abort time was read-only/idempotent. Lets assistant failover rotate
+   * to a fallback model for read-only-tool timeouts while side-effecting tool
+   * timeouts stay blocked. Optional for the same re-export reason as above.
+   */
+  timedOutDuringReadOnlyToolExecution?: boolean;
   promptError: unknown;
   /**
    * Identifies which phase produced the promptError.

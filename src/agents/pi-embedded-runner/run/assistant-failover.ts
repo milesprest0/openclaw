@@ -43,6 +43,7 @@ export async function handleAssistantFailover(params: {
   idleTimedOut: boolean;
   timedOutDuringCompaction: boolean;
   timedOutDuringToolExecution: boolean;
+  timedOutDuringReadOnlyToolExecution: boolean;
   allowSameModelIdleTimeoutRetry: boolean;
   assistantProfileFailureReason: AuthProfileFailureReason | null;
   lastProfileId?: string;
@@ -128,7 +129,8 @@ export async function handleAssistantFailover(params: {
           action: "throw",
           overloadProfileRotations,
           error: new FailoverError(
-            "The AI service is temporarily overloaded. Please try again in a moment.",
+            "The service is temporarily overloaded. Your uploaded files and request have " +
+              "been saved — please try again in a moment.",
             {
               reason: "overloaded",
               provider: params.activeErrorContext.provider,
@@ -187,6 +189,7 @@ export async function handleAssistantFailover(params: {
       timedOut: params.timedOut,
       timedOutDuringCompaction: params.timedOutDuringCompaction,
       timedOutDuringToolExecution: params.timedOutDuringToolExecution,
+      timedOutDuringReadOnlyToolExecution: params.timedOutDuringReadOnlyToolExecution,
       profileRotated: true,
     });
   }

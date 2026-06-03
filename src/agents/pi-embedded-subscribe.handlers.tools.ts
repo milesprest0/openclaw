@@ -86,6 +86,8 @@ function loadBeforeToolCall(): Promise<BeforeToolCallModule> {
 type ToolStartRecord = {
   startTime: number;
   args: unknown;
+  /** Normalized tool name, used to classify read-only vs side-effecting tools. */
+  toolName: string;
 };
 
 /** Track tool execution start data for after_tool_call hook. */
@@ -93,6 +95,38 @@ const toolStartData = new Map<string, ToolStartRecord>();
 
 function buildToolStartKey(runId: string, toolCallId: string): string {
   return `${runId}:${toolCallId}`;
+}
+
+// Read-only / idempotent tools: a timeout that fires while ONLY these are in
+// flight carries no mutation risk, so the run is allowed to fail over to a
+// fallback model (heavy multi-doc turns degrade gracefully instead of stranding
+// the user). Names are compared after `normalizeToolName`. Fail-closed: any name
+// not in this set is treated as side-effecting.
+const READ_ONLY_TOOL_NAMES = new Set([
+  "read",
+  "doc_extract",
+  "doc_processor",
+  "attachment_extract",
+  "extract",
+  "search",
+  "web_search",
+  "memory_search",
+  "memory_get",
+  "sessions_history",
+  "sessions_list",
+  "session_status",
+  "image",
+]);
+
+/**
+ * Whether a (normalized) tool name is read-only / idempotent for the purpose of
+ * timeout-failover safety. Side-effecting tools (exec, edit, write, message,
+ * sessions_send, sessions_spawn, process, gateway, cron, canvas, nodes, …) are
+ * NOT read-only and must keep blocking failover so mutations are never replayed
+ * on a fallback model.
+ */
+export function isReadOnlyToolName(toolName: string): boolean {
+  return READ_ONLY_TOOL_NAMES.has(normalizeToolName(toolName));
 }
 
 export function countActiveToolExecutions(runId: string): number {
@@ -104,6 +138,28 @@ export function countActiveToolExecutions(runId: string): number {
     }
   }
   return count;
+}
+
+/**
+ * True only when there is at least one active tool execution for this run AND
+ * every active execution is read-only/idempotent. Returns false when there are
+ * no active executions (the caller should rely on `countActiveToolExecutions`
+ * to detect the "no tool in flight" case) and false the moment any active tool
+ * is side-effecting.
+ */
+export function allActiveToolExecutionsReadOnly(runId: string): boolean {
+  const prefix = `${runId}:`;
+  let sawActive = false;
+  for (const [key, record] of toolStartData.entries()) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    sawActive = true;
+    if (!isReadOnlyToolName(record.toolName)) {
+      return false;
+    }
+  }
+  return sawActive;
 }
 
 function isCronAddAction(args: unknown): boolean {
@@ -661,7 +717,11 @@ export function handleToolExecutionStart(
 
     // Track start time and args for after_tool_call hook.
     const startedAt = Date.now();
-    toolStartData.set(buildToolStartKey(runId, toolCallId), { startTime: startedAt, args });
+    toolStartData.set(buildToolStartKey(runId, toolCallId), {
+      startTime: startedAt,
+      args,
+      toolName,
+    });
 
     if (toolName === "read") {
       const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
