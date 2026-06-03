@@ -26,6 +26,11 @@ import { normalizeReplyPayloadsForDelivery } from "../../infra/outbound/payloads
 import { getSessionBindingService } from "../../infra/outbound/session-binding-service.js";
 import { logLargePayload } from "../../logging/diagnostic-payload.js";
 import {
+  DEFAULT_INBOUND_RETENTION_GRACE_MS,
+  pinInboundMedia,
+  releaseInboundMedia,
+} from "../../media/inbound-retention.js";
+import {
   appendLocalMediaParentRoots,
   getAgentScopedMediaLocalRoots,
 } from "../../media/local-roots.js";
@@ -2156,6 +2161,18 @@ export const chatHandlers: GatewayRequestHandlers = {
               sessionKey,
               agentId,
             }));
+            // Pin the offloaded inbound originals to this run so the periodic
+            // time-based media sweep cannot reclaim them while the turn is
+            // in-flight. A long / timed-out multi-file legal turn must never
+            // have its uploads swept mid-run; the pin lasts the run timeout
+            // plus a grace window, and is downgraded to grace on completion
+            // (success OR failure) in the run's finally below.
+            if (offloadedRefs.length > 0) {
+              pinInboundMedia(
+                offloadedRefs.map((ref) => ref.id),
+                timeoutMs + DEFAULT_INBOUND_RETENTION_GRACE_MS,
+              );
+            }
           },
           {
             phase: "agent-turn",
@@ -2789,10 +2806,30 @@ export const chatHandlers: GatewayRequestHandlers = {
           });
         })
         .finally(() => {
+          // Release the inbound-media pin on completion. Downgrade to a grace
+          // window (not a delete) for BOTH success and failure so a failed /
+          // timed-out turn retains the user's uploads long enough to recover
+          // or retry without re-upload. Actual reclamation is left to the
+          // normal age-based sweep once the grace window elapses.
+          if (offloadedRefs.length > 0) {
+            releaseInboundMedia(
+              offloadedRefs.map((ref) => ref.id),
+              DEFAULT_INBOUND_RETENTION_GRACE_MS,
+            );
+          }
           activeRunAbort.cleanup();
           context.removeChatRun(clientRunId, clientRunId, sessionKey);
         });
     } catch (err) {
+      // Synchronous failure before/while wiring the run: release any pin we
+      // already placed (with grace) so we never strand a pin, and never delete
+      // the user's freshly uploaded originals on a failed turn.
+      if (offloadedRefs.length > 0) {
+        releaseInboundMedia(
+          offloadedRefs.map((ref) => ref.id),
+          DEFAULT_INBOUND_RETENTION_GRACE_MS,
+        );
+      }
       context.chatAbortControllers.delete(clientRunId);
       context.removeChatRun(clientRunId, clientRunId, sessionKey);
       const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));

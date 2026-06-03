@@ -523,6 +523,79 @@ describe("media store", () => {
     await expectTempStoreCase(run);
   });
 
+  describe("inbound retention (durable across in-flight/failed turn)", () => {
+    afterEach(async () => {
+      const retention = await import("./inbound-retention.js");
+      retention.clearInboundRetention();
+    });
+
+    it("retains a pinned inbound file when a sweep runs during an in-flight turn", async () => {
+      await withTempStore(async (store) => {
+        const retention = await import("./inbound-retention.js");
+        const saved = await store.saveMediaBuffer(
+          Buffer.from("fax-pdf"),
+          "application/pdf",
+          "inbound",
+        );
+        // Simulate an upload offloaded for an in-flight turn: pin it.
+        retention.pinInboundMedia(saved.id, 5 * 60_000);
+        // Make the file look old enough that a wall-clock sweep would delete it.
+        const past = Date.now() - 10_000;
+        await fs.utimes(saved.path, past / 1000, past / 1000);
+
+        // Sweep with an aggressive TTL: pinned file must survive because the
+        // sweep refreshes pinned mtimes to now before pruning.
+        await store.cleanOldMedia(1);
+
+        const stat = await fs.stat(saved.path);
+        expect(stat.isFile()).toBe(true);
+      });
+    });
+
+    it("retains through grace after a FAILED turn release, then ages out (never deleted on failure)", async () => {
+      await withTempStore(async (store) => {
+        const retention = await import("./inbound-retention.js");
+        const saved = await store.saveMediaBuffer(
+          Buffer.from("fax-pdf"),
+          "application/pdf",
+          "inbound",
+        );
+        retention.pinInboundMedia(saved.id, 5 * 60_000);
+        // Turn FAILED: release with a (here small) grace window instead of deleting.
+        retention.releaseInboundMedia(saved.id, 60_000);
+        const past = Date.now() - 10_000;
+        await fs.utimes(saved.path, past / 1000, past / 1000);
+
+        // Within grace: still retained (failure must not destroy uploads).
+        await store.cleanOldMedia(1);
+        expect((await fs.stat(saved.path)).isFile()).toBe(true);
+
+        // After grace expires the pin is gone, so the normal age-based sweep
+        // reclaims it. Drop the pin and age the file again.
+        retention.releaseInboundMedia(saved.id, 0);
+        retention.clearInboundRetention();
+        const past2 = Date.now() - 10_000;
+        await fs.utimes(saved.path, past2 / 1000, past2 / 1000);
+        await store.cleanOldMedia(1);
+        await expect(fs.stat(saved.path)).rejects.toThrow();
+      });
+    });
+
+    it("sweeps an unpinned inbound file normally", async () => {
+      await withTempStore(async (store) => {
+        const saved = await store.saveMediaBuffer(
+          Buffer.from("unpinned"),
+          "application/pdf",
+          "inbound",
+        );
+        const past = Date.now() - 10_000;
+        await fs.utimes(saved.path, past / 1000, past / 1000);
+        await store.cleanOldMedia(1);
+        await expect(fs.stat(saved.path)).rejects.toThrow();
+      });
+    });
+  });
+
   it.each([
     {
       name: "saves text buffers with the expected size and extension",
