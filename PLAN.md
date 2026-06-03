@@ -85,3 +85,150 @@ Extend `src/agents/pi-embedded-runner/run/failover-policy.test.ts`:
 
 - `npm run build` (typecheck) green.
 - Targeted vitest run of failover-policy + assistant-failover tests green.
+
+---
+
+# PLAN (continued) — Durable fallbacks for ALL recoverable failures (gaps #1 + #2)
+
+Builds on the read-only-tool-timeout fix above. Goal: make the fallback ladder
+durable for every RECOVERABLE failure across every account VM (all VMs build
+from this fork), and ensure the user-facing dead-end is last-resort + informative.
+
+## GAP #1 — All RECOVERABLE failures walk the fallback ladder
+
+### Single source of truth classifier
+
+`isRecoverableFailoverReason(reason: FailoverReason | null): boolean`
+(exported from `failover-policy.ts`, unit-tested).
+
+- RECOVERABLE → rotate down the ladder when a fallback is configured:
+  `timeout`, `overloaded`, `rate_limit`, `empty_response`, `no_error_details`,
+  `unclassified`, `unknown`, `auth`, and `null`.
+  - `null` is the bucket for network drops / stream-`terminated` / socket-reset /
+    ECONNRESET that the classifier can't label. Verified against
+    `classifyFailoverReasonFromHttpStatus` (errors.ts): 500/502/504/503/499 →
+    `timeout`, 529 → `overloaded`, transient no-body shapes → `null`, generic
+    network patterns → `no_error_details`/`unclassified`. All land in the
+    recoverable set, so a clean connection error degrades down the ladder.
+  - `auth` stays recoverable to preserve the existing profile-rotation handling
+    (a different account/key may succeed); ladder applies after rotation.
+- NON-RECOVERABLE → must NOT silently rotate to a different model:
+  `auth_permanent`, `billing`, `model_not_found`, `format`, `session_expired`.
+  - Exhaustiveness `never` guard fails CLOSED: a future FailoverReason is treated
+    non-recoverable until explicitly reviewed (can't silently burn the ladder).
+
+### `shouldRotateAssistant` change
+
+Split into two clear predicates:
+
+- `erroredRotation = !aborted && (failoverFailure || reason !== null) &&
+ isRecoverableFailoverReason(reason)` — recoverable errored turns rotate; the
+  `(failoverFailure || reason !== null)` guard keeps a clean turn (null reason,
+  no failure) on `continue_normal`.
+- `timeoutRotation` — unchanged read-only-tool relaxation (side-effecting tool
+  timeouts and compaction timeouts stay blocked).
+
+### `resolveRunFailoverDecision` (assistant stage) change
+
+Previously a non-rotating assistant turn always fell to `continue_normal`. That
+would have SWALLOWED non-recoverable errored failures (billing/auth_permanent/
+model_not_found/format/session_expired). Added a branch: a non-rotating turn that
+still carried an errored failure signal (`!timedOut && (failoverFailure ||
+reason !== null)`) and is non-recoverable now returns `surface_error` (which on
+the `handleAssistantFailover` non-timeout branch throws a FailoverError carrying
+the reason — billing/rate_limit keep their `suspend` handling). Genuinely clean
+turns still `continue_normal`.
+
+Net effect on the decision routing:
+
+- recoverable + fallbackConfigured + !aborted → `rotate_profile` (then
+  `fallback_model` after rotation exhausted). NEVER `surface_error`.
+- non-recoverable errored → `surface_error` (+ dedicated suspend for
+  billing/rate_limit). NEVER a blind different-model rotation.
+- externalAbort → `surface_error` regardless of reason (gated before the
+  classifier runs).
+
+### Documented decision — side-effecting tool timeout + fallback
+
+Kept CONSERVATIVE/blocked. A timeout during an in-flight side-effecting tool
+(`timedOutDuringToolExecution && !timedOutDuringReadOnlyToolExecution`) still
+resolves to `continue_normal` and is NOT failed over to a different model in the
+same turn. Rationale: `fallback_model` throws a FailoverError that the
+model-fallback loop catches and RE-RUNS the turn on a fresh model from the
+current transcript — there is no mechanism here that guarantees the in-flight
+mutation (exec/edit/write/message-send) won't be re-issued, so allowing
+fall-over risks double-executing a side effect. Until a "do not replay the
+in-flight mutation" guarantee exists at the tool layer, side-effecting timeouts
+stay blocked from same-turn auto-retry. Read-only tool timeouts remain allowed
+to fall over (idempotent; safe to replay on a peer model).
+
+## GAP #2 — Dead-end is last-resort + informative
+
+### Ladder exhaustion location (verified, no code change needed)
+
+The configured fallback ladder (`agents.defaults.model.fallbacks`) is consumed
+in `src/agents/model-fallback.ts` `runModelWithFallback`'s
+`for (let i = 0; i < candidates.length; i += 1)` loop. The embedded run throws a
+`FailoverError` for a recoverable failure; the loop catches it, normalizes it,
+records the attempt, and `continue`s to the NEXT candidate. The terminal
+`FallbackSummaryError` (or rethrow of the single `lastError`) is thrown only
+AFTER the loop exhausts every candidate. Even unrecognized errors continue the
+loop while candidates remain (only abort/context-overflow short-circuit). So the
+ladder is fully walked before the terminal surface — confirmed by the existing
+`model-fallback.test.ts` (53 tests) + the cross-provider / codex-server-error /
+empty-error-retry integration suites (all green). Gap #2's code portion is the
+assertion (covered) + copy.
+
+### Terminal user-facing copy (improved, fork-owned, white-label)
+
+- run.ts terminal timeout payload (~2400): now states the service is
+  temporarily unavailable AND that uploaded files/work are saved and the request
+  can be retried, with the operator config hint kept in a parenthetical.
+- run.ts rate-limit escalation FailoverError (~901): "temporarily at capacity
+  (rate-limited)… your uploaded files and request have been saved — please try
+  again in a moment."
+- assistant-failover.ts overloaded FailoverError (~131): "temporarily
+  overloaded… files/request saved — try again."
+  All copy is white-label (no vendor/model/provider names).
+
+### Web-adapter boundary (documented, intentionally out of scope)
+
+The literal string "I'm having trouble connecting right now" is NOT in this
+repo — it is the Prest0n web-adapter's own generic fallback on Fernando's VM
+(prest0n-web-adapter.service). We do NOT chase it here. This change makes the
+gateway return a clearer terminal error PAYLOAD (the improved copy above) so the
+web-adapter has a better message to surface than its bare generic fallback. The
+adapter-side copy is a separate, VM-local change outside this fork.
+
+## Tests
+
+`failover-policy.test.ts` extended (now 60 cases):
+
+- `isRecoverableFailoverReason`: parametrized over the full recoverable and
+  non-recoverable sets.
+- recoverable errored reasons (timeout/overloaded/rate_limit/empty_response/
+  no_error_details/unclassified/unknown) → `rotate_profile`, then
+  `fallback_model` after rotation — NEVER surface_error/continue_normal.
+- null-reason connection-drop with a failover signal → rotates.
+- non-recoverable (auth_permanent/billing/model_not_found/session_expired/
+  format) → `surface_error`, not rotate/fallback, before AND after rotation.
+- externalAbort over many reasons → `surface_error`.
+- clean turn (no signal, null reason) → `continue_normal`.
+- side-effecting tool timeout → `continue_normal` (blocked); read-only tool
+  timeout → `fallback_model` (allowed). Both explicit.
+- ladder-exhaustion: asserted at the model-fallback unit/integration layer
+  (existing suites), not re-implemented here; noted above.
+
+## Validation (gaps #1+#2)
+
+- `npx vitest run failover-policy.test.ts` → 60 passed.
+- assistant-failover.test.ts (11), failover-observation.test.ts (4),
+  provider-error-patterns (38), model-fallback.test.ts (53), attempt.stop-reason
+  -recovery (2), and the run.\* integration suites
+  (timeout-triggered-compaction 16, empty-error-retry 6,
+  codex-server-error-fallback 1, cross-provider-fallback 2, incomplete-turn 91)
+  → all green, no regressions.
+- Heap-bumped `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit`:
+  4 errors on the branch, IDENTICAL 4 errors on `main` (slack prepare.ts,
+  openai-transport-stream.ts, attempt.test.ts, cron/service.test-harness.ts).
+  ZERO new errors introduced. None of the 4 are in any file this change touched.

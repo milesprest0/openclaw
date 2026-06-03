@@ -129,7 +129,8 @@ export async function handleAssistantFailover(params: {
           action: "throw",
           overloadProfileRotations,
           error: new FailoverError(
-            "The AI service is temporarily overloaded. Please try again in a moment.",
+            "The service is temporarily overloaded. Your uploaded files and request have " +
+              "been saved — please try again in a moment.",
             {
               reason: "overloaded",
               provider: params.activeErrorContext.provider,
