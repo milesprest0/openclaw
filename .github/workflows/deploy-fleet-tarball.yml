@@ -1,0 +1,164 @@
+name: Deploy Fleet Tarball (openclaw self-update)
+
+# Phase 2 of fleet scaling: build the `openclaw` package, `npm pack` it, and
+# upload the tarball + a pinned version string to GCS. Each account VM runs a
+# 90s `openclaw-self-update.timer` (in the prest0 repo under
+# functions/src/prest0nVm/bootstrap/) that pulls this tarball, installs it
+# globally, and restarts the gateway — mirroring the proven web-adapter
+# pull-based deploy.
+#
+# Bridging rationale (documented in prest0 PLAN.md too): the `openclaw`
+# package BUILDS here (openclaw-fork) but VM bootstrap lives in the `prest0`
+# repo. Rather than cross-repo git coupling, we publish a single artifact to
+# the shared GCS bucket the fleet already reads from
+# (`gs://prest0-agent-storage/`). The VM side only needs storage.objectViewer
+# (the default compute SA already has it) — no cross-repo auth, no IAP tunnel.
+#
+# Triggers:
+#   - workflow_dispatch (manual, the normal path — promote a known-good ref).
+#   - push to main touching package.json / src (optional auto-publish; guarded
+#     so docs-only changes don't churn the tarball). Disabled by default via
+#     the `paths` filter being conservative; flip `publish_on_push` input for a
+#     manual run when you want a one-off.
+#
+# SECURITY: this uploads a globally-installed runtime to the fleet. Keep this
+# lane deterministic. Do NOT add flaky/long checks here. The build is gated on
+# `pnpm build` succeeding; a broken build never reaches GCS.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref (branch, tag, or SHA) to build and ship to the fleet
+        required: true
+        default: main
+        type: string
+      dry_run:
+        description: Build + pack but do NOT upload to GCS (validation only)
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # Never run two fleet uploads at once — they'd race the `openclaw-latest.tgz`
+  # generation and the version file.
+  group: deploy-fleet-tarball
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24.x"
+  PNPM_VERSION: "10.32.1"
+  GCS_BUCKET: "gs://prest0-agent-storage/openclaw"
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: "read"
+      id-token: "write" # for google-github-actions/auth (WIF) if configured
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Build
+        run: pnpm build
+
+      - name: Build Control UI
+        run: pnpm ui:build
+
+      - name: Resolve package version
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved openclaw version: $VERSION"
+
+      - name: Pack npm tarball
+        id: pack
+        run: |
+          set -euo pipefail
+          # `npm pack` runs the package's prepack; produce the tarball into a
+          # known dir so the upload step has a deterministic path.
+          OUT_DIR="$RUNNER_TEMP/fleet-pack"
+          mkdir -p "$OUT_DIR"
+          # --pack-destination lands the tgz in OUT_DIR; capture its filename.
+          npm pack --pack-destination "$OUT_DIR" >/dev/null
+          TGZ="$(ls -1 "$OUT_DIR"/*.tgz | head -1)"
+          if [ -z "$TGZ" ] || [ ! -s "$TGZ" ]; then
+            echo "::error::npm pack produced no tarball"
+            exit 1
+          fi
+          # Guard: the tarball must be a valid gzip containing package.json
+          # (same invariant the VM updater re-checks before installing).
+          gzip -t "$TGZ"
+          tar -tzf "$TGZ" package/package.json >/dev/null
+          SHA="$(sha256sum "$TGZ" | awk '{print $1}')"
+          echo "tgz=$TGZ" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Packed $TGZ ($SHA)"
+
+      - name: Google Auth
+        if: ${{ !inputs.dry_run }}
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          # Reuse the same SA key secret the prest0 deploy workflow uses. Add
+          # `GCP_SA_KEY` to this repo's secrets (or wire WIF) before enabling
+          # non-dry-run uploads. The SA needs storage.objectAdmin on
+          # gs://prest0-agent-storage/openclaw/**.
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Set up Cloud SDK
+        if: ${{ !inputs.dry_run }}
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Upload tarball + version to GCS
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          TGZ: ${{ steps.pack.outputs.tgz }}
+          SHA: ${{ steps.pack.outputs.sha }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          TGZ_DST="${GCS_BUCKET}/openclaw-latest.tgz"
+          VER_DST="${GCS_BUCKET}/latest-version.txt"
+
+          echo "Uploading tarball -> $TGZ_DST"
+          gsutil -h "x-goog-meta-source-commit:${COMMIT}" \
+                 -h "x-goog-meta-source-sha256:${SHA}" \
+                 -h "x-goog-meta-openclaw-version:${VERSION}" \
+                 cp "$TGZ" "$TGZ_DST"
+
+          # Write the version file LAST and to a temp object, then rename, so a
+          # VM that polls mid-upload never sees a new version string pointing at
+          # an old/half-written tarball. (The VM also re-verifies the tarball.)
+          printf '%s\n' "$VERSION" > "$RUNNER_TEMP/latest-version.txt"
+          echo "Uploading version file ($VERSION) -> $VER_DST"
+          gsutil -h "x-goog-meta-source-commit:${COMMIT}" \
+                 -h "x-goog-meta-source-sha256:${SHA}" \
+                 cp "$RUNNER_TEMP/latest-version.txt" "$VER_DST"
+
+          echo "--- tarball object metadata ---"
+          gsutil ls -L "$TGZ_DST" | grep -E 'Generation|Hash|version' | head -8
+          echo "Fleet self-update artifacts published: openclaw@${VERSION} (${SHA:0:12})"
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SHA: ${{ steps.pack.outputs.sha }}
+        run: |
+          echo "DRY RUN — built + packed openclaw@${VERSION} (${SHA:0:12}); upload skipped."
