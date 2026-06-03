@@ -57,6 +57,12 @@ type AssistantDecisionParams = {
   timedOut: boolean;
   timedOutDuringCompaction: boolean;
   timedOutDuringToolExecution: boolean;
+  /**
+   * True only when the tool-execution timeout was entirely read-only/idempotent.
+   * When true, failover (rotate/fallback) is allowed despite a tool being in
+   * flight; side-effecting tool timeouts (false) remain blocked.
+   */
+  timedOutDuringReadOnlyToolExecution: boolean;
   profileRotated: boolean;
 };
 
@@ -82,7 +88,9 @@ function shouldRotatePrompt(params: PromptDecisionParams): boolean {
 function shouldRotateAssistant(params: AssistantDecisionParams): boolean {
   return (
     (!params.aborted && (params.failoverFailure || params.failoverReason !== null)) ||
-    (params.timedOut && !params.timedOutDuringCompaction && !params.timedOutDuringToolExecution)
+    (params.timedOut &&
+      !params.timedOutDuringCompaction &&
+      (!params.timedOutDuringToolExecution || params.timedOutDuringReadOnlyToolExecution))
   );
 }
 

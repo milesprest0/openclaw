@@ -1293,6 +1293,8 @@ export async function runEmbeddedPiAgent(
             currentAttemptAssistant,
           } = attempt;
           const timedOutDuringToolExecution = attempt.timedOutDuringToolExecution ?? false;
+          const timedOutDuringReadOnlyToolExecution =
+            attempt.timedOutDuringReadOnlyToolExecution ?? false;
           if (sessionIdUsed && sessionIdUsed !== activeSessionId) {
             activeSessionId = sessionIdUsed;
           }
@@ -2224,6 +2226,7 @@ export async function runEmbeddedPiAgent(
             timedOut,
             timedOutDuringCompaction,
             timedOutDuringToolExecution,
+            timedOutDuringReadOnlyToolExecution,
             profileRotated: false,
           });
           const assistantFailoverOutcome = await handleAssistantFailover({
@@ -2237,6 +2240,7 @@ export async function runEmbeddedPiAgent(
             idleTimedOut,
             timedOutDuringCompaction,
             timedOutDuringToolExecution,
+            timedOutDuringReadOnlyToolExecution,
             allowSameModelIdleTimeoutRetry:
               timedOut &&
               idleTimedOut &&

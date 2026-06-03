@@ -73,6 +73,7 @@ describe("resolveRunFailoverDecision", () => {
         timedOut: false,
         timedOutDuringCompaction: false,
         timedOutDuringToolExecution: false,
+        timedOutDuringReadOnlyToolExecution: false,
         profileRotated: false,
       }),
     ).toEqual({
@@ -93,6 +94,7 @@ describe("resolveRunFailoverDecision", () => {
         timedOut: false,
         timedOutDuringCompaction: false,
         timedOutDuringToolExecution: false,
+        timedOutDuringReadOnlyToolExecution: false,
         profileRotated: true,
       }),
     ).toEqual({
@@ -113,6 +115,7 @@ describe("resolveRunFailoverDecision", () => {
         timedOut: false,
         timedOutDuringCompaction: false,
         timedOutDuringToolExecution: false,
+        timedOutDuringReadOnlyToolExecution: false,
         profileRotated: false,
       }),
     ).toEqual({
@@ -137,7 +140,7 @@ describe("resolveRunFailoverDecision", () => {
     });
   });
 
-  it("does not rotate or fallback assistant timeouts that fired during tool execution (#52147)", () => {
+  it("does not rotate or fallback assistant timeouts that fired during side-effecting tool execution (#52147)", () => {
     expect(
       resolveRunFailoverDecision({
         stage: "assistant",
@@ -149,6 +152,7 @@ describe("resolveRunFailoverDecision", () => {
         timedOut: true,
         timedOutDuringCompaction: false,
         timedOutDuringToolExecution: true,
+        timedOutDuringReadOnlyToolExecution: false,
         profileRotated: false,
       }),
     ).toEqual({
@@ -156,7 +160,7 @@ describe("resolveRunFailoverDecision", () => {
     });
   });
 
-  it("does not fallback assistant tool-execution timeouts even after profile rotation exhausted (#52147)", () => {
+  it("does not fallback assistant side-effecting tool-execution timeouts even after profile rotation exhausted (#52147)", () => {
     expect(
       resolveRunFailoverDecision({
         stage: "assistant",
@@ -168,7 +172,70 @@ describe("resolveRunFailoverDecision", () => {
         timedOut: true,
         timedOutDuringCompaction: false,
         timedOutDuringToolExecution: true,
+        timedOutDuringReadOnlyToolExecution: false,
         profileRotated: true,
+      }),
+    ).toEqual({
+      action: "continue_normal",
+    });
+  });
+
+  it("rotates assistant timeouts that fired entirely during read-only tool execution (degrade gracefully)", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: true,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure: false,
+        failoverReason: null,
+        timedOut: true,
+        timedOutDuringCompaction: false,
+        timedOutDuringToolExecution: true,
+        timedOutDuringReadOnlyToolExecution: true,
+        profileRotated: false,
+      }),
+    ).toEqual({
+      action: "rotate_profile",
+      reason: null,
+    });
+  });
+
+  it("falls back to a fallback model on a read-only tool timeout after profile rotation is exhausted", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: true,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure: false,
+        failoverReason: null,
+        timedOut: true,
+        timedOutDuringCompaction: false,
+        timedOutDuringToolExecution: true,
+        timedOutDuringReadOnlyToolExecution: true,
+        profileRotated: true,
+      }),
+    ).toEqual({
+      action: "fallback_model",
+      reason: "timeout",
+    });
+  });
+
+  it("does not fail over a read-only tool timeout that also occurred during compaction", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: true,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure: false,
+        failoverReason: null,
+        timedOut: true,
+        timedOutDuringCompaction: true,
+        timedOutDuringToolExecution: true,
+        timedOutDuringReadOnlyToolExecution: true,
+        profileRotated: false,
       }),
     ).toEqual({
       action: "continue_normal",
@@ -187,6 +254,7 @@ describe("resolveRunFailoverDecision", () => {
         timedOut: true,
         timedOutDuringCompaction: false,
         timedOutDuringToolExecution: false,
+        timedOutDuringReadOnlyToolExecution: false,
         profileRotated: false,
       }),
     ).toEqual({
@@ -207,6 +275,7 @@ describe("resolveRunFailoverDecision", () => {
         timedOut: true,
         timedOutDuringCompaction: false,
         timedOutDuringToolExecution: false,
+        timedOutDuringReadOnlyToolExecution: false,
         profileRotated: false,
       }),
     ).toEqual({

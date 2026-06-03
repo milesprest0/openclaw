@@ -6,9 +6,12 @@ import {
 } from "../infra/agent-events.js";
 import type { MessagingToolSend } from "./pi-embedded-messaging.types.js";
 import {
+  allActiveToolExecutionsReadOnly,
+  countActiveToolExecutions,
   handleToolExecutionEnd,
   handleToolExecutionStart,
   handleToolExecutionUpdate,
+  isReadOnlyToolName,
 } from "./pi-embedded-subscribe.handlers.tools.js";
 import type {
   ToolCallSummary,
@@ -1377,5 +1380,85 @@ describe("control UI credential redaction (issue #72283)", () => {
     }
     expect(emittedResult).not.toContain("sk-or-v1-abcdef0123456789");
     expect(emittedResult).toContain("OPENROUTER_API_KEY=");
+  });
+});
+
+describe("read-only tool classification for timeout failover", () => {
+  it("classifies read-only / idempotent tools", () => {
+    for (const name of [
+      "read",
+      "search",
+      "memory_search",
+      "memory_get",
+      "sessions_history",
+      "sessions_list",
+      "session_status",
+      "image",
+      "doc_extract",
+    ]) {
+      expect(isReadOnlyToolName(name)).toBe(true);
+    }
+  });
+
+  it("treats side-effecting and unknown tools as not read-only (fail-closed)", () => {
+    for (const name of [
+      "exec",
+      "bash",
+      "edit",
+      "write",
+      "message",
+      "sessions_send",
+      "sessions_spawn",
+      "process",
+      "gateway",
+      "cron",
+      "canvas",
+      "nodes",
+      "some_unknown_future_tool",
+    ]) {
+      expect(isReadOnlyToolName(name)).toBe(false);
+    }
+  });
+
+  async function startTool(runId: string, toolName: string, toolCallId: string): Promise<void> {
+    const { ctx } = createTestContext();
+    ctx.params.runId = runId;
+    await handleToolExecutionStart(ctx, {
+      type: "tool_execution_start",
+      toolName,
+      toolCallId,
+      args: {},
+    } as ToolExecutionStartEvent);
+  }
+
+  it("returns false when no tool is in flight", () => {
+    const runId = `ro-none-${Math.random()}`;
+    expect(countActiveToolExecutions(runId)).toBe(0);
+    expect(allActiveToolExecutionsReadOnly(runId)).toBe(false);
+  });
+
+  it("returns true when every active tool is read-only", async () => {
+    const runId = `ro-all-${Math.random()}`;
+    await startTool(runId, "read", "t1");
+    await startTool(runId, "memory_get", "t2");
+    expect(countActiveToolExecutions(runId)).toBe(2);
+    expect(allActiveToolExecutionsReadOnly(runId)).toBe(true);
+  });
+
+  it("returns false when any active tool is side-effecting", async () => {
+    const runId = `ro-mixed-${Math.random()}`;
+    await startTool(runId, "read", "t1");
+    await startTool(runId, "exec", "t2");
+    expect(countActiveToolExecutions(runId)).toBe(2);
+    expect(allActiveToolExecutionsReadOnly(runId)).toBe(false);
+  });
+
+  it("isolates active-tool accounting per run id", async () => {
+    const runA = `ro-a-${Math.random()}`;
+    const runB = `ro-b-${Math.random()}`;
+    await startTool(runA, "read", "t1");
+    await startTool(runB, "exec", "t1");
+    expect(allActiveToolExecutionsReadOnly(runA)).toBe(true);
+    expect(allActiveToolExecutionsReadOnly(runB)).toBe(false);
   });
 });

@@ -110,7 +110,10 @@ import {
   resolveBootstrapPromptTruncationWarningMode,
   resolveBootstrapTotalMaxChars,
 } from "../../pi-embedded-helpers.js";
-import { countActiveToolExecutions } from "../../pi-embedded-subscribe.handlers.tools.js";
+import {
+  allActiveToolExecutionsReadOnly,
+  countActiveToolExecutions,
+} from "../../pi-embedded-subscribe.handlers.tools.js";
 import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settings.js";
 import {
@@ -743,6 +746,11 @@ export async function runEmbeddedAttempt(
   let idleTimedOut = false;
   let timedOutDuringCompaction = false;
   let timedOutDuringToolExecution = false;
+  // True only when timedOutDuringToolExecution AND every in-flight tool at abort
+  // time was read-only/idempotent (read/doc-extract/search/memory_get/etc). Used
+  // to allow assistant failover to a fallback model on read-only-tool timeouts
+  // while still blocking failover when a side-effecting tool was running.
+  let timedOutDuringReadOnlyToolExecution = false;
   let promptError: unknown = null;
   let emitDiagnosticRunCompleted:
     | ((
@@ -2383,6 +2391,7 @@ export async function runEmbeddedAttempt(
           timedOut = true;
           if (!timedOutDuringCompaction && countActiveToolExecutions(params.runId) > 0) {
             timedOutDuringToolExecution = true;
+            timedOutDuringReadOnlyToolExecution = allActiveToolExecutionsReadOnly(params.runId);
           }
         }
         if (isTimeout) {
@@ -3780,6 +3789,7 @@ export async function runEmbeddedAttempt(
         idleTimedOut,
         timedOutDuringCompaction,
         timedOutDuringToolExecution,
+        timedOutDuringReadOnlyToolExecution,
         promptError,
         promptErrorSource,
         preflightRecovery,
