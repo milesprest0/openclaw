@@ -31,6 +31,15 @@ const OptionalBootstrapFileNameSchema = z.enum([
   "IDENTITY.md",
 ]);
 
+const AgentContextBudgetOverrideSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    maxAssembledTokens: z.number().int().positive().optional(),
+    perThreadMaxImages: z.number().int().nonnegative().optional(),
+    reserveTokens: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
 export const SilentReplyPolicyConfigSchema = z
   .object({
     direct: SilentReplyPolicySchema.optional(),
@@ -215,6 +224,17 @@ export const AgentDefaultsSchema = z
         truncateAfterCompaction: z.boolean().optional(),
         maxActiveTranscriptBytes: NonNegativeByteSizeSchema.optional(),
         notifyUser: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    contextBudget: z
+      .object({
+        enabled: z.boolean().optional(),
+        maxAssembledTokens: z.number().int().positive().optional(),
+        perThreadMaxImages: z.number().int().nonnegative().optional(),
+        reserveTokens: z.number().int().nonnegative().optional(),
+        overrideKey: z.string().optional(),
+        overrides: z.record(z.string(), AgentContextBudgetOverrideSchema).optional(),
       })
       .strict()
       .optional(),

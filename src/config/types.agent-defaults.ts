@@ -296,6 +296,13 @@ export type AgentDefaultsConfig = {
   contextPruning?: AgentContextPruningConfig;
   /** Compaction tuning and pre-compaction memory flush behavior. */
   compaction?: AgentCompactionConfig;
+  /**
+   * Deterministic per-turn assembled-context ceiling. Enforced in code (never a
+   * model decision) BEFORE the model/compaction call so an unbounded thread can
+   * never be handed to the compaction model (which would time out). See
+   * AgentContextBudgetConfig.
+   */
+  contextBudget?: AgentContextBudgetConfig;
   /** Embedded Pi runner hardening and compatibility controls. */
   embeddedPi?: {
     /**
@@ -443,6 +450,50 @@ export type AgentDefaultsConfig = {
   };
   /** Optional sandbox settings for non-main sessions. */
   sandbox?: AgentSandboxConfig;
+};
+
+/**
+ * Deterministic per-turn assembled-context budget. The assembler guard measures
+ * the full per-turn context (bootstrap + transcript history + inline image
+ * attachments) and trims it under `maxAssembledTokens - reserveTokens` BEFORE the
+ * model/compaction call. This is a hard, server-side, code-enforced ceiling — it
+ * is never a model decision.
+ *
+ * A global default lives in the fleet config; account-specific Prest0n VMs render
+ * their workspace config from a Firestore seed and can override any field here
+ * (the override flows through the normal agents.defaults.contextBudget merge).
+ */
+export type AgentContextBudgetConfig = {
+  /** Enable the assembler-enforced context ceiling. Default: true. */
+  enabled?: boolean;
+  /**
+   * Hard ceiling (tokens) for the full assembled per-turn context. When the
+   * assembled context exceeds `maxAssembledTokens - reserveTokens`, the guard
+   * trims (image age-out, then oldest-turn drop) until under budget.
+   *
+   * This is NOT the 16k bootstrap budget (bootstrap-only); it is the full
+   * per-turn assembly ceiling. Default when unset is derived from the resolved
+   * model context window (see run/context-budget.ts).
+   */
+  maxAssembledTokens?: number;
+  /**
+   * Max inline image payloads retained in live context. Older images beyond this
+   * count (oldest first) are replaced by a short text placeholder. Default: 8.
+   */
+  perThreadMaxImages?: number;
+  /** Headroom (tokens) reserved for the model response. Default: 20000. */
+  reserveTokens?: number;
+  /** Optional tenant override key for fleet-shared defaults. */
+  overrideKey?: string;
+  /** Optional per-tenant context-budget overrides keyed by overrideKey/account id. */
+  overrides?: Record<string, AgentContextBudgetOverrideConfig>;
+};
+
+export type AgentContextBudgetOverrideConfig = {
+  enabled?: boolean;
+  maxAssembledTokens?: number;
+  perThreadMaxImages?: number;
+  reserveTokens?: number;
 };
 
 export type AgentCompactionMode = "default" | "safeguard";

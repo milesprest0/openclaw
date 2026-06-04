@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
+export { applyContextBudgetGuard } from "./context-budget.js";
 
 export const PRUNED_HISTORY_IMAGE_MARKER = "[image data removed - already processed by model]";
 export const PRUNED_HISTORY_MEDIA_REFERENCE_MARKER =

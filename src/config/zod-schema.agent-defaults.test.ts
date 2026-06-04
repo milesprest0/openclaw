@@ -161,6 +161,28 @@ describe("agent defaults schema", () => {
     expect(agent.contextLimits?.memoryGetMaxChars).toBe(18_000);
   });
 
+  it("accepts agents.defaults.contextBudget with tenant overrides", () => {
+    const defaults = AgentDefaultsSchema.parse({
+      contextBudget: {
+        enabled: true,
+        maxAssembledTokens: 120_000,
+        perThreadMaxImages: 8,
+        reserveTokens: 20_000,
+        overrideKey: "tenant-shared",
+        overrides: {
+          "tenant-shared": {
+            maxAssembledTokens: 90_000,
+            perThreadMaxImages: 4,
+            reserveTokens: 10_000,
+          },
+        },
+      },
+    })!;
+
+    expect(defaults.contextBudget?.overrideKey).toBe("tenant-shared");
+    expect(defaults.contextBudget?.overrides?.["tenant-shared"]?.perThreadMaxImages).toBe(4);
+  });
+
   it("accepts positive heartbeat timeoutSeconds on defaults and agent entries", () => {
     const defaults = AgentDefaultsSchema.parse({
       heartbeat: { timeoutSeconds: 45, skipWhenBusy: true },

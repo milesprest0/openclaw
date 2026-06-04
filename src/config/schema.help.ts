@@ -1384,6 +1384,16 @@ export const FIELD_HELP: Record<string, string> = {
     "User-prompt template used for the pre-compaction memory flush turn when generating memory candidates. Use this only when you need custom extraction instructions beyond the default memory flush behavior.",
   "agents.defaults.compaction.memoryFlush.systemPrompt":
     "System-prompt override for the pre-compaction memory flush turn to control extraction style and safety constraints. Use carefully so custom instructions do not reduce memory quality or leak sensitive context.",
+  "agents.defaults.contextBudget":
+    "Deterministic, code-enforced ceiling on the full assembled per-turn context (bootstrap + transcript history + inline image attachments). The guard runs before the model/compaction call so an oversized thread can never be handed to the compaction model (which would time out). Distinct from the bootstrap budget, which only caps bootstrap context.",
+  "agents.defaults.contextBudget.enabled":
+    "Enable the assembler-enforced per-turn context ceiling (default: true). Disable only for debugging; turning it off lets unbounded threads reach the compaction model.",
+  "agents.defaults.contextBudget.maxAssembledTokens":
+    "Hard ceiling (tokens) for the full assembled per-turn context. When over (maxAssembledTokens - reserveTokens) the guard ages out oldest inline images, then drops oldest transcript turns until under budget. When unset, a reasoning-safe default is derived from the resolved model context window.",
+  "agents.defaults.contextBudget.perThreadMaxImages":
+    "Maximum inline image payloads retained in live context (default: 8). Older images beyond this count are replaced by a short text placeholder, keeping the newest images.",
+  "agents.defaults.contextBudget.reserveTokens":
+    "Headroom (tokens) reserved for the model response, subtracted from maxAssembledTokens when computing the trim threshold (default: 20000).",
   "agents.defaults.embeddedPi":
     "Embedded Pi runner hardening controls for how workspace-local Pi settings are trusted and applied in OpenClaw sessions.",
   "agents.defaults.embeddedPi.projectSettingsPolicy":

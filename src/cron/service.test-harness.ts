@@ -243,6 +243,7 @@ export function createMockCronStateForJobs(params: {
     timer: null,
     storeLoadedAtMs: nowMs,
     storeFileMtimeMs: null,
+    fileWatcher: null,
     op: Promise.resolve(),
     warnedDisabled: false,
     warnedMissingSessionTargetJobIds: new Set<string>(),

@@ -5,6 +5,10 @@ import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-bu
 import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
+import {
+  isLikelyOverBudget,
+  resolveContextBudget,
+} from "../../agents/pi-embedded-runner/run/context-budget.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
   derivePromptTokens,
@@ -502,7 +506,17 @@ export async function runPreflightCompactionIfNeeded(params: {
     Number.isFinite(persistedTotalTokens) &&
     persistedTotalTokens > 0;
   const maxActiveTranscriptBytes = resolveMaxActiveTranscriptBytes(params.cfg);
-  const shouldCheckActiveTranscriptBytes = typeof maxActiveTranscriptBytes === "number";
+  // Deterministic per-turn context budget (assembler-enforced ceiling). When
+  // enabled, an over-ceiling assembled context must force a preflight compaction
+  // so the compaction model is never handed a multi-million-token / 100-image
+  // thread (which would time out). See context-budget-guard.ts.
+  const contextBudget = resolveContextBudget({
+    cfg: params.cfg,
+    contextWindowTokens,
+    accountId: params.followupRun.run.agentAccountId,
+  });
+  const shouldCheckActiveTranscriptBytes =
+    typeof maxActiveTranscriptBytes === "number" || contextBudget.enabled;
   const transcriptSizeSnapshot = shouldCheckActiveTranscriptBytes
     ? await readSessionLogSnapshot({
         sessionId: entry.sessionId,
@@ -521,8 +535,25 @@ export async function runPreflightCompactionIfNeeded(params: {
     typeof activeTranscriptBytes === "number" &&
     typeof maxActiveTranscriptBytes === "number" &&
     activeTranscriptBytes >= maxActiveTranscriptBytes;
+  // Context-budget precheck intentionally avoids raw transcript-byte heuristics.
+  // Large tool outputs or metadata blobs can inflate bytes without adding prompt
+  // pressure after usage normalization and tool-result truncation. Use only
+  // persisted token estimates here.
+  const approxTranscriptTokensForBudget = hasPersistedTotalTokens
+    ? Math.floor(persistedTotalTokens)
+    : 0;
+  const shouldCompactByContextBudget =
+    contextBudget.enabled &&
+    isLikelyOverBudget({
+      budget: contextBudget,
+      approxTranscriptTokens: approxTranscriptTokensForBudget,
+    });
   const shouldUseTranscriptFallback = entry.totalTokensFresh === false || !hasPersistedTotalTokens;
-  if (!shouldUseTranscriptFallback && !shouldCompactByTranscriptBytes) {
+  if (
+    !shouldUseTranscriptFallback &&
+    !shouldCompactByTranscriptBytes &&
+    !shouldCompactByContextBudget
+  ) {
     return entry ?? params.sessionEntry;
   }
   const promptTokenEstimate = estimatePromptTokensForMemoryFlush(
@@ -571,7 +602,10 @@ export async function runPreflightCompactionIfNeeded(params: {
       `promptTokensEst=${promptTokenEstimate ?? "undefined"} ` +
       `activeTranscriptBytes=${activeTranscriptBytes ?? "undefined"} ` +
       `maxActiveTranscriptBytes=${maxActiveTranscriptBytes ?? "undefined"} ` +
-      `sizeTrigger=${shouldCompactByTranscriptBytes}`,
+      `sizeTrigger=${shouldCompactByTranscriptBytes} ` +
+      `contextBudgetEnabled=${contextBudget.enabled} ` +
+      `maxAssembledTokens=${contextBudget.maxAssembledTokens} ` +
+      `budgetTrigger=${shouldCompactByContextBudget}`,
   );
 
   const shouldCompactByTokens = shouldRunPreflightCompaction({
@@ -581,12 +615,17 @@ export async function runPreflightCompactionIfNeeded(params: {
     reserveTokensFloor,
     softThresholdTokens,
   });
-  const shouldCompact = shouldCompactByTokens || shouldCompactByTranscriptBytes;
+  const shouldCompact =
+    shouldCompactByTokens || shouldCompactByTranscriptBytes || shouldCompactByContextBudget;
   if (!shouldCompact) {
     return entry ?? params.sessionEntry;
   }
 
-  const compactionTrigger = shouldCompactByTranscriptBytes ? "transcript_bytes" : "tokens";
+  const compactionTrigger = shouldCompactByTranscriptBytes
+    ? "transcript_bytes"
+    : shouldCompactByContextBudget && !shouldCompactByTokens
+      ? "context_budget"
+      : "tokens";
   logVerbose(
     `preflightCompaction triggered: sessionKey=${params.sessionKey} ` +
       `tokenCount=${tokenCountForCompaction ?? freshPersistedTokens ?? "undefined"} ` +
@@ -608,6 +647,7 @@ export async function runPreflightCompactionIfNeeded(params: {
     sandboxSessionKey: params.runtimePolicySessionKey,
     allowGatewaySubagentBinding: true,
     messageChannel: params.followupRun.run.messageProvider,
+    agentAccountId: params.followupRun.run.agentAccountId,
     groupId: entry.groupId ?? params.followupRun.run.groupId,
     groupChannel: entry.groupChannel ?? params.followupRun.run.groupChannel,
     groupSpace: entry.space ?? params.followupRun.run.groupSpace,

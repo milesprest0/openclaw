@@ -330,6 +330,7 @@ import {
   shouldFlagCompactionTimeout,
 } from "./compaction-timeout.js";
 import {
+  applyContextBudgetGuard,
   installHistoryImagePruneContextTransform,
   pruneProcessedHistoryImages,
 } from "./history-image-prune.js";
@@ -3053,9 +3054,27 @@ export async function runEmbeddedAttempt(
           const msgCount = activeSession.messages.length;
           const systemLen = systemPromptText?.length ?? 0;
           const promptLen = effectivePrompt.length;
+          const contextTokenBudget = params.contextTokenBudget ?? DEFAULT_CONTEXT_TOKENS;
+          const contextBudgetGuard = applyContextBudgetGuard({
+            messages: activeSession.messages,
+            cfg: params.config,
+            contextWindowTokens: contextTokenBudget,
+            accountId: params.agentAccountId,
+            systemPrompt: systemPromptForHook,
+            prompt: promptForModel,
+            promptImages: imageResult.images,
+          });
+          if (contextBudgetGuard.applied) {
+            activeSession.agent.state.messages = contextBudgetGuard.messages;
+            log.info(
+              `[context-budget] applied sessionKey=${params.sessionKey ?? params.sessionId} ` +
+                `provider=${params.provider}/${params.modelId} estimated=${contextBudgetGuard.estimatedTokens} ` +
+                `budget=${contextBudgetGuard.budgetBeforeReserve} imageBlocksPruned=${contextBudgetGuard.imageBlocksPruned} ` +
+                `droppedTurns=${contextBudgetGuard.droppedTurns}`,
+            );
+          }
           const sessionSummary = summarizeSessionContext(activeSession.messages);
           const reserveTokens = settingsManager.getCompactionReserveTokens();
-          const contextTokenBudget = params.contextTokenBudget ?? DEFAULT_CONTEXT_TOKENS;
           emitTrustedDiagnosticEvent({
             type: "context.assembled",
             runId: params.runId,

@@ -706,7 +706,7 @@ describe("runMemoryFlushIfNeeded", () => {
       replyOperation: createReplyOperation(),
     });
 
-    expect(entry).toBe(sessionEntry);
+    expect(entry?.sessionId).toBe(sessionEntry.sessionId);
     expect(compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
   });
 
@@ -775,7 +775,7 @@ describe("runMemoryFlushIfNeeded", () => {
       replyOperation: createReplyOperation(),
     });
 
-    expect(entry).toBe(sessionEntry);
+    expect(entry?.sessionId).toBe(sessionEntry.sessionId);
     expect(compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
   });
 

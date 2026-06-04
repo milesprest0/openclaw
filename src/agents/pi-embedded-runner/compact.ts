@@ -143,6 +143,7 @@ import { readPiModelContextTokens } from "./model-context-tokens.js";
 import { buildModelAliasLines, resolveModelAsync } from "./model.js";
 import { sanitizeSessionHistory, validateReplayTurns } from "./replay-history.js";
 import { shouldUseOpenAIWebSocketTransport } from "./run/attempt.thread-helpers.js";
+import { applyContextBudgetGuard } from "./run/context-budget.js";
 import { buildEmbeddedSandboxInfo } from "./sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
 import { resolveEmbeddedRunSkillEntries } from "./skills-runtime.js";
@@ -1157,8 +1158,22 @@ async function compactEmbeddedPiSessionDirectOnce(
                   : {}),
               })
             : truncated;
-          if (limited.length > 0) {
-            session.agent.state.messages = limited;
+          const contextBudgetGuard = applyContextBudgetGuard({
+            messages: limited,
+            cfg: params.config,
+            contextWindowTokens: ctxInfo.tokens,
+            accountId: params.agentAccountId,
+          });
+          if (contextBudgetGuard.applied) {
+            log.info(
+              `[context-budget] bounded compaction input sessionKey=${params.sessionKey ?? params.sessionId} ` +
+                `estimated=${contextBudgetGuard.estimatedTokens} budget=${contextBudgetGuard.budgetBeforeReserve} ` +
+                `imageBlocksPruned=${contextBudgetGuard.imageBlocksPruned} droppedTurns=${contextBudgetGuard.droppedTurns}`,
+            );
+          }
+          const boundedHistory = contextBudgetGuard.messages;
+          if (boundedHistory.length > 0) {
+            session.agent.state.messages = boundedHistory;
           }
           const hookRunner = asCompactionHookRunner(getGlobalHookRunner());
           const observedTokenCount = normalizeObservedTokenCount(params.currentTokenCount);
@@ -1217,7 +1232,10 @@ async function compactEmbeddedPiSessionDirectOnce(
           // history subset, not the full session.
           let fullSessionTokensBefore = 0;
           try {
-            fullSessionTokensBefore = limited.reduce((sum, msg) => sum + estimateTokens(msg), 0);
+            fullSessionTokensBefore = session.messages.reduce(
+              (sum, msg) => sum + estimateTokens(msg),
+              0,
+            );
           } catch {
             // If token estimation throws on a malformed message, fall back to 0 so
             // the sanity check below becomes a no-op instead of crashing compaction.
