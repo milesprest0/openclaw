@@ -237,6 +237,11 @@ describe("short-term dreaming config", () => {
       minUniqueQueries: constants.DEFAULT_DREAMING_MIN_UNIQUE_QUERIES,
       recencyHalfLifeDays: constants.DEFAULT_DREAMING_RECENCY_HALF_LIFE_DAYS,
       maxAgeDays: 30,
+      recall: {
+        maxEntries: 5000,
+        ttlDays: 90,
+        minRecallCount: 2,
+      },
       verboseLogging: false,
       storage: {
         mode: "separate",
@@ -277,6 +282,11 @@ describe("short-term dreaming config", () => {
       minUniqueQueries: 3,
       recencyHalfLifeDays: 21,
       maxAgeDays: 30,
+      recall: {
+        maxEntries: 5000,
+        ttlDays: 90,
+        minRecallCount: 2,
+      },
       verboseLogging: true,
       storage: {
         mode: "separate",
@@ -316,6 +326,11 @@ describe("short-term dreaming config", () => {
       minUniqueQueries: 3,
       recencyHalfLifeDays: 9,
       maxAgeDays: 45,
+      recall: {
+        maxEntries: 5000,
+        ttlDays: 90,
+        minRecallCount: 2,
+      },
       verboseLogging: false,
       storage: {
         mode: "separate",
@@ -351,6 +366,11 @@ describe("short-term dreaming config", () => {
       minUniqueQueries: constants.DEFAULT_DREAMING_MIN_UNIQUE_QUERIES,
       recencyHalfLifeDays: constants.DEFAULT_DREAMING_RECENCY_HALF_LIFE_DAYS,
       maxAgeDays: 30,
+      recall: {
+        maxEntries: 5000,
+        ttlDays: 90,
+        minRecallCount: 2,
+      },
       verboseLogging: false,
       storage: {
         mode: "separate",

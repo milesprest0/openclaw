@@ -118,6 +118,11 @@ type ShortTermPromotionDreamingConfig = {
   minUniqueQueries: number;
   recencyHalfLifeDays?: number;
   maxAgeDays?: number;
+  recall?: {
+    maxEntries: number;
+    ttlDays: number;
+    minRecallCount: number;
+  };
   verboseLogging: boolean;
   storage?: {
     mode: "inline" | "separate" | "both";
@@ -399,6 +404,11 @@ export function resolveShortTermPromotionDreamingConfig(params: {
     minUniqueQueries: resolved.minUniqueQueries,
     recencyHalfLifeDays: resolved.recencyHalfLifeDays,
     ...(typeof resolved.maxAgeDays === "number" ? { maxAgeDays: resolved.maxAgeDays } : {}),
+    recall: {
+      maxEntries: resolved.recall.maxEntries,
+      ttlDays: resolved.recall.ttlDays,
+      minRecallCount: resolved.recall.minRecallCount,
+    },
     verboseLogging: resolved.verboseLogging,
     storage: resolved.storage,
     ...(resolved.execution.model ? { execution: { model: resolved.execution.model } } : {}),

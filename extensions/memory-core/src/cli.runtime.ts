@@ -1212,6 +1212,7 @@ export async function runMemorySearch(
         query,
         results,
         timezone: dreaming.timezone,
+        recallStoreEviction: dreaming.recall,
       }).catch(() => {
         // Recall tracking is best-effort and must not block normal search results.
       });
