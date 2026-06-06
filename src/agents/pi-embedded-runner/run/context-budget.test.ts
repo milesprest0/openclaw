@@ -152,4 +152,63 @@ describe("context budget guard", () => {
     expect(overridden.perThreadMaxImages).toBe(4);
     expect(overridden.overrideKey).toBe("tenant-b");
   });
+
+  it("preserves a single oversized current turn instead of dropping to empty", () => {
+    const messages: AgentMessage[] = [makeUserMessage(`current-turn ${"Z".repeat(250_000)}`)];
+
+    const result = applyContextBudgetGuard({
+      messages,
+      cfg: {
+        agents: {
+          defaults: {
+            contextBudget: {
+              enabled: true,
+              maxAssembledTokens: 1_000,
+              reserveTokens: 1,
+            },
+          },
+        },
+      },
+      contextWindowTokens: 1_000,
+      prompt: "new prompt",
+    });
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.role).toBe("user");
+    expect(result.messages[0]?.content).toBe(messages[0]?.content);
+    expect(result.droppedTurns).toBe(0);
+  });
+
+  it("always keeps the most recent turn under aggressive budget pressure", () => {
+    const messages: AgentMessage[] = [
+      makeUserMessage("old-turn-1"),
+      makeAssistantMessage("old-ack-1"),
+      makeUserMessage("old-turn-2"),
+      makeAssistantMessage("old-ack-2"),
+      makeUserMessage(`current-turn ${"Y".repeat(200_000)}`),
+      makeAssistantMessage("current-ack"),
+    ];
+
+    const result = applyContextBudgetGuard({
+      messages,
+      cfg: {
+        agents: {
+          defaults: {
+            contextBudget: {
+              enabled: true,
+              maxAssembledTokens: 1_000,
+              reserveTokens: 1,
+            },
+          },
+        },
+      },
+      contextWindowTokens: 1_000,
+      prompt: "new prompt",
+    });
+
+    const latestUser = result.messages.find((message) => message.role === "user");
+    expect(latestUser?.content).toBe(messages[4]?.content);
+    expect(result.messages.at(-1)?.content).toBe("current-ack");
+    expect(result.messages).not.toHaveLength(0);
+  });
 });

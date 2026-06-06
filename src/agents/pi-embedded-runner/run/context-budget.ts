@@ -8,6 +8,7 @@ import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { normalizeOptionalAccountId } from "../../../routing/session-key.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
 import { SAFETY_MARGIN, estimateMessagesTokens } from "../../compaction.js";
+import { log } from "../logger.js";
 
 const DEFAULT_MAX_ASSEMBLED_RATIO = 0.6;
 const DEFAULT_PER_THREAD_MAX_IMAGES = 8;
@@ -218,6 +219,15 @@ function resolveDropCountForOldestTurn(messages: AgentMessage[]): number {
   return messages.length;
 }
 
+function resolveLastUserMessageIndex(messages: AgentMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export function applyContextBudgetGuard(params: {
   messages: AgentMessage[];
   cfg?: OpenClawConfig;
@@ -263,7 +273,18 @@ export function applyContextBudgetGuard(params: {
     if (dropCount <= 0) {
       break;
     }
-    currentMessages = currentMessages.slice(Math.min(dropCount, currentMessages.length));
+    const lastUserIndex = resolveLastUserMessageIndex(currentMessages);
+    const maxDropCount =
+      lastUserIndex >= 0 ? lastUserIndex : Math.max(0, currentMessages.length - 1);
+    if (maxDropCount <= 0) {
+      log.info(
+        `[context-budget] drop floor hit; preserving most recent turn ` +
+          `estimated=${estimatedTokens} budget=${budget.budgetBeforeReserve} ` +
+          `messages=${currentMessages.length}`,
+      );
+      break;
+    }
+    currentMessages = currentMessages.slice(Math.min(dropCount, maxDropCount));
     droppedTurns += 1;
     estimatedTokens = estimateAssembledTokens({
       messages: currentMessages,

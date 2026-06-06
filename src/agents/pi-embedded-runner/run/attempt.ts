@@ -3055,15 +3055,33 @@ export async function runEmbeddedAttempt(
           const systemLen = systemPromptText?.length ?? 0;
           const promptLen = effectivePrompt.length;
           const contextTokenBudget = params.contextTokenBudget ?? DEFAULT_CONTEXT_TOKENS;
-          const contextBudgetGuard = applyContextBudgetGuard({
-            messages: activeSession.messages,
-            cfg: params.config,
-            contextWindowTokens: contextTokenBudget,
-            accountId: params.agentAccountId,
-            systemPrompt: systemPromptForHook,
-            prompt: promptForModel,
-            promptImages: imageResult.images,
-          });
+          const contextBudgetGuard = (() => {
+            try {
+              return applyContextBudgetGuard({
+                messages: activeSession.messages,
+                cfg: params.config,
+                contextWindowTokens: contextTokenBudget,
+                accountId: params.agentAccountId,
+                systemPrompt: systemPromptForHook,
+                prompt: promptForModel,
+                promptImages: imageResult.images,
+              });
+            } catch (err) {
+              log.warn(
+                `[context-budget] guard failed open; using original transcript ` +
+                  `sessionKey=${params.sessionKey ?? params.sessionId} provider=${params.provider}/${params.modelId} ` +
+                  `error=${String(err)}`,
+              );
+              return {
+                messages: activeSession.messages,
+                estimatedTokens: 0,
+                budgetBeforeReserve: contextTokenBudget,
+                imageBlocksPruned: 0,
+                droppedTurns: 0,
+                applied: false,
+              };
+            }
+          })();
           if (contextBudgetGuard.applied) {
             activeSession.agent.state.messages = contextBudgetGuard.messages;
             log.info(
