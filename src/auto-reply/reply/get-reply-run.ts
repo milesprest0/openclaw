@@ -795,13 +795,6 @@ export async function runPreparedReply(
       catalog: thinkingCatalog,
     })
   ) {
-    const explicitThink = directives.hasThinkDirective && directives.thinkLevel !== undefined;
-    if (explicitThink) {
-      typing.cleanup();
-      return {
-        text: `Thinking level "${resolvedThinkLevel}" is not supported for ${provider}/${model}. Use one of: ${formatThinkingLevels(provider, model, ", ", thinkingCatalog)}.`,
-      };
-    }
     const fallbackThinkLevel = resolveSupportedThinkingLevel({
       provider,
       model,
@@ -815,7 +808,7 @@ export async function runPreparedReply(
         sessionEntry &&
         sessionStore &&
         sessionKey &&
-        sessionEntry.thinkingLevel === previousThinkLevel
+        (sessionEntry.thinkingLevel === previousThinkLevel || directives.hasThinkDirective)
       ) {
         sessionEntry.thinkingLevel = fallbackThinkLevel;
         sessionEntry.updatedAt = Date.now();
