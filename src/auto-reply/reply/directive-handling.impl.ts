@@ -300,22 +300,25 @@ export async function handleDirectiveOnly(
     return queueAck;
   }
 
-  if (
-    directives.hasThinkDirective &&
+  // If the requested level is not supported, silently map/force-funnel it to a supported level
+  // rather than returning an error to keep the workflow robust and responsive.
+  const resolvedDirectiveThinkLevel =
     directives.thinkLevel &&
-    !isThinkingLevelSupported({
+    isThinkingLevelSupported({
       provider: resolvedProvider,
       model: resolvedModel,
       level: directives.thinkLevel,
       catalog: thinkingCatalog,
     })
-  ) {
-    return {
-      text: `Thinking level "${directives.thinkLevel}" is not supported for ${resolvedProvider}/${resolvedModel}. Use one of: ${formatThinkingLevels(resolvedProvider, resolvedModel, ", ", thinkingCatalog)}.`,
-    };
-  }
-
-  const resolvedDirectiveThinkLevel = directives.thinkLevel;
+      ? directives.thinkLevel
+      : directives.thinkLevel
+        ? resolveSupportedThinkingLevel({
+            provider: resolvedProvider,
+            model: resolvedModel,
+            level: directives.thinkLevel,
+            catalog: thinkingCatalog,
+          })
+        : undefined;
   const nextThinkLevel = directives.hasThinkDirective
     ? resolvedDirectiveThinkLevel
     : ((sessionEntry?.thinkingLevel as ThinkLevel | undefined) ?? currentThinkLevel);
