@@ -1,4 +1,7 @@
-import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalLowercaseString,
+} from "../../shared/string-coerce.js";
 import { resolveAnthropicCacheRetentionFamily } from "./anthropic-family-cache-semantics.js";
 
 type CacheRetention = "none" | "short" | "long";
@@ -12,6 +15,34 @@ export function isGooglePromptCacheEligible(params: {
   }
   const normalizedModelId = normalizeLowercaseStringOrEmpty(params.modelId);
   return normalizedModelId.startsWith("gemini-2.5") || normalizedModelId.startsWith("gemini-3");
+}
+
+/**
+ * Returns true for OpenAI/GPT models routed via OpenRouter, where OpenAI
+ * automatically applies implicit prefix caching on inputs ≥ 1,024 tokens.
+ * Recognises both plain OpenAI provider references and OpenRouter-proxied
+ * GPT model IDs (including the `~openai/` always-latest alias form).
+ */
+export function isOpenAIPromptCacheEligible(params: {
+  provider?: string;
+  modelApi?: string;
+  modelId?: string;
+}): boolean {
+  const provider = normalizeOptionalLowercaseString(params.provider);
+  // Direct OpenAI provider path
+  if (provider === "openai") {
+    return true;
+  }
+  // OpenRouter-proxied OpenAI models (e.g. openrouter/openai/gpt-5.5,
+  // openrouter/~openai/gpt-latest,
+  // openrouter/~openai/gpt-mini-latest)
+  if (provider === "openrouter") {
+    const modelId = normalizeLowercaseStringOrEmpty(params.modelId).replace(/^~/, "");
+    return (
+      modelId.startsWith("openai/") || modelId.startsWith("gpt-") || modelId.includes("gpt-latest")
+    );
+  }
+  return false;
 }
 
 export function resolveCacheRetention(
@@ -29,8 +60,9 @@ export function resolveCacheRetention(
     hasExplicitCacheConfig,
   });
   const googleEligible = isGooglePromptCacheEligible({ modelApi, modelId });
+  const openaiEligible = isOpenAIPromptCacheEligible({ provider, modelApi, modelId });
 
-  if (!family && !googleEligible) {
+  if (!family && !googleEligible && !openaiEligible) {
     return undefined;
   }
 
@@ -47,5 +79,14 @@ export function resolveCacheRetention(
     return "long";
   }
 
-  return family === "anthropic-direct" ? "short" : undefined;
+  // For anthropic-direct, default to short (5m ephemeral breakpoint).
+  // For OpenAI implicit caching, default to "short" so surfaces that
+  // declare cacheRetention: "long" (e.g. long-lived internal sessions)
+  // can receive the longer hint once the infrastructure layer supports it.
+  // OpenAI's automatic prefix cache is already active at ≥1,024 tokens —
+  // this value is advisory; it does not disable the implicit cache.
+  if (family === "anthropic-direct" || openaiEligible) {
+    return "short";
+  }
+  return undefined;
 }
