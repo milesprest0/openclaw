@@ -1,5 +1,15 @@
 import { redactSensitiveText } from "../logging/redact.js";
 
+export class SocketDropException extends Error {
+  readonly safeToRetry: boolean;
+
+  constructor(message: string, safeToRetry: boolean, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "SocketDropException";
+    this.safeToRetry = safeToRetry;
+  }
+}
+
 export function extractErrorCode(err: unknown): string | undefined {
   if (!err || typeof err !== "object") {
     return undefined;
@@ -112,7 +122,13 @@ export function formatUncaughtError(err: unknown): string {
   return formatErrorMessage(err);
 }
 
-export type ErrorKind = "refusal" | "timeout" | "rate_limit" | "context_length" | "unknown";
+export type ErrorKind =
+  | "refusal"
+  | "timeout"
+  | "rate_limit"
+  | "context_length"
+  | "socket_drop"
+  | "unknown";
 
 export function detectErrorKind(err: unknown): ErrorKind | undefined {
   if (err === undefined) {
@@ -120,6 +136,14 @@ export function detectErrorKind(err: unknown): ErrorKind | undefined {
   }
   const message = formatErrorMessage(err).toLowerCase();
   const code = extractErrorCode(err)?.toLowerCase();
+
+  if (
+    err instanceof SocketDropException ||
+    code === "econnreset" ||
+    message.includes("socket hang up")
+  ) {
+    return "socket_drop";
+  }
 
   if (
     message.includes("refusal") ||

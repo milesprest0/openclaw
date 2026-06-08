@@ -41,7 +41,7 @@ import {
 } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
 import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
-import { formatErrorMessage } from "../../infra/errors.js";
+import { formatErrorMessage, SocketDropException } from "../../infra/errors.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -544,6 +544,19 @@ export function buildKnownAgentRunFailureReplyPayload(params: {
   sessionCtx: TemplateContext;
   resolvedVerboseLevel: VerboseLevel | undefined;
 }): ReplyPayload | undefined {
+  if (params.err instanceof SocketDropException) {
+    if (!params.err.safeToRetry) {
+      return markAgentRunFailureReplyPayload({
+        text: resolveExternalRunFailureTextForConversation({
+          text: "⚠️ Connection to model provider dropped mid-stream. Operation aborted to prevent partial state changes.",
+          sessionCtx: params.sessionCtx,
+          isGenericRunnerFailure: false,
+        }),
+      });
+    }
+    return undefined;
+  }
+
   const message = formatErrorMessage(params.err);
   const isFallbackSummary = isFallbackSummaryError(params.err);
   const isBilling = isFallbackSummary

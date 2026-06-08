@@ -8,6 +8,7 @@ import {
   hasErrnoCode,
   isErrno,
   readErrorName,
+  SocketDropException,
 } from "./errors.js";
 
 function createCircularObject() {
@@ -111,6 +112,10 @@ describe("error helpers", () => {
     {
       value: new Error("context_window exceeded with too many tokens"),
       expected: "context_length",
+    },
+    {
+      value: new SocketDropException("socket hang up", true),
+      expected: "socket_drop",
     },
     {
       value: new Error("plain provider failure"),

@@ -12,6 +12,7 @@ import {
   isMockedFetch,
   type DispatcherAwareRequestInit,
 } from "./runtime-fetch.js";
+import { SocketAdapter } from "./socket-adapter.js";
 import {
   assertHostnameAllowedWithPolicy,
   closeDispatcher,
@@ -469,9 +470,14 @@ export async function fetchWithSsrFGuard(params: GuardedFetchOptions): Promise<G
       // because the default global fetch path will not honor per-request
       // dispatchers.
       const shouldUseRuntimeFetch = Boolean(dispatcher) && !supportsDispatcherInit;
-      const response = shouldUseRuntimeFetch
-        ? await fetchWithRuntimeDispatcher(parsedUrl.toString(), init)
-        : await defaultFetch(parsedUrl.toString(), init);
+      let responseStarted = false;
+      const response = await SocketAdapter.attach(
+        shouldUseRuntimeFetch
+          ? fetchWithRuntimeDispatcher(parsedUrl.toString(), init)
+          : defaultFetch(parsedUrl.toString(), init),
+        () => responseStarted,
+      );
+      responseStarted = true;
 
       await captureGuardedFetchExchange({
         url: parsedUrl.toString(),

@@ -1,5 +1,6 @@
 import { createTypingKeepaliveLoop } from "../../channels/typing-lifecycle.js";
 import { createTypingStartGuard } from "../../channels/typing-start-guard.js";
+import { SocketDropException } from "../../infra/errors.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { isSilentReplyPrefixText, isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
 
@@ -13,6 +14,12 @@ export type TypingController = {
   markDispatchIdle: () => void;
   cleanup: () => void;
 };
+
+export function cleanupTypingOnSocketDrop(typing: Pick<TypingController, "cleanup">, err: unknown) {
+  if (err instanceof SocketDropException) {
+    typing.cleanup();
+  }
+}
 
 export function createTypingController(params: {
   onReplyStart?: () => Promise<void> | void;

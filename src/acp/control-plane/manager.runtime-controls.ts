@@ -94,6 +94,9 @@ export async function applyManagerRuntimeControls(params: {
           });
         }
         for (const [key, value] of configOptions) {
+          if (key === "thinking") {
+            continue;
+          }
           if (advertisedKeys.size > 0 && !advertisedKeys.has(key)) {
             throw new AcpRuntimeError(
               "ACP_BACKEND_UNSUPPORTED_CONTROL",

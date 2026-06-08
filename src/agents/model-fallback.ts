@@ -4,7 +4,7 @@ import {
 } from "../config/model-input.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { emitFailoverEvent } from "../infra/diagnostic-events.js";
-import { formatErrorMessage } from "../infra/errors.js";
+import { formatErrorMessage, SocketDropException } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
@@ -1112,6 +1112,9 @@ export async function runWithModelFallback<T>(params: {
       // that may have a smaller context window and fail worse.
       const errMessage = formatErrorMessage(err);
       if (isLikelyContextOverflowError(errMessage)) {
+        throw err;
+      }
+      if (err instanceof SocketDropException && !err.safeToRetry) {
         throw err;
       }
       const normalized =

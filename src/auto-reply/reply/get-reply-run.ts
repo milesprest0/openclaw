@@ -75,7 +75,7 @@ import { buildSessionStartupContextPrelude, shouldApplyStartupContext } from "./
 import { isModelOverrideStillAuthoritative } from "./stored-model-override.js";
 import { resolveTypingMode } from "./typing-mode.js";
 import { resolveRunTypingPolicy } from "./typing-policy.js";
-import type { TypingController } from "./typing.js";
+import { cleanupTypingOnSocketDrop, type TypingController } from "./typing.js";
 
 type AgentDefaults = NonNullable<OpenClawConfig["agents"]>["defaults"];
 type ExecOverrides = Pick<ExecToolDefaults, "host" | "security" | "ask" | "node">;
@@ -1098,43 +1098,48 @@ export async function runPreparedReply(
         }
       : undefined;
 
-  return runReplyAgent({
-    commandBody: prefixedCommandBody,
-    transcriptCommandBody,
-    followupRun,
-    queueKey,
-    resolvedQueue,
-    shouldSteer,
-    shouldFollowup,
-    isActive,
-    isRunActive: () => {
-      const latestSessionState = resolvePreparedSessionState();
-      const latestActiveSessionId =
-        piRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey) ?? latestSessionState.sessionId;
-      return piRuntime?.isEmbeddedPiRunActive(latestActiveSessionId) ?? false;
-    },
-    isStreaming,
-    opts,
-    typing,
-    sessionEntry: preparedSessionState.sessionEntry,
-    sessionStore,
-    sessionKey,
-    runtimePolicySessionKey,
-    storePath,
-    defaultModel,
-    agentCfgContextTokens: agentCfg?.contextTokens,
-    resolvedVerboseLevel: resolvedVerboseLevel ?? "off",
-    toolProgressDetail:
-      normalizeToolProgressDetail(agentCfg?.toolProgressDetail) ??
-      normalizeToolProgressDetail(cfg.agents?.defaults?.toolProgressDetail),
-    isNewSession,
-    blockStreamingEnabled,
-    blockReplyChunking,
-    resolvedBlockStreamingBreak,
-    sessionCtx,
-    shouldInjectGroupIntro,
-    typingMode,
-    resetTriggered: effectiveResetTriggered,
-    replyThreadingOverride,
-  });
+  try {
+    return await runReplyAgent({
+      commandBody: prefixedCommandBody,
+      transcriptCommandBody,
+      followupRun,
+      queueKey,
+      resolvedQueue,
+      shouldSteer,
+      shouldFollowup,
+      isActive,
+      isRunActive: () => {
+        const latestSessionState = resolvePreparedSessionState();
+        const latestActiveSessionId =
+          piRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey) ?? latestSessionState.sessionId;
+        return piRuntime?.isEmbeddedPiRunActive(latestActiveSessionId) ?? false;
+      },
+      isStreaming,
+      opts,
+      typing,
+      sessionEntry: preparedSessionState.sessionEntry,
+      sessionStore,
+      sessionKey,
+      runtimePolicySessionKey,
+      storePath,
+      defaultModel,
+      agentCfgContextTokens: agentCfg?.contextTokens,
+      resolvedVerboseLevel: resolvedVerboseLevel ?? "off",
+      toolProgressDetail:
+        normalizeToolProgressDetail(agentCfg?.toolProgressDetail) ??
+        normalizeToolProgressDetail(cfg.agents?.defaults?.toolProgressDetail),
+      isNewSession,
+      blockStreamingEnabled,
+      blockReplyChunking,
+      resolvedBlockStreamingBreak,
+      sessionCtx,
+      shouldInjectGroupIntro,
+      typingMode,
+      resetTriggered: effectiveResetTriggered,
+      replyThreadingOverride,
+    });
+  } catch (error) {
+    cleanupTypingOnSocketDrop(typing, error);
+    throw error;
+  }
 }

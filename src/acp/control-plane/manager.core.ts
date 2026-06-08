@@ -604,6 +604,9 @@ export class AcpSessionManager {
           .map((entry) => normalizeText(entry))
           .filter(Boolean) as string[],
       );
+      if (key === "thinking") {
+        return nextOptions;
+      }
       if (advertisedKeys.size > 0 && !advertisedKeys.has(key)) {
         throw new AcpRuntimeError(
           "ACP_BACKEND_UNSUPPORTED_CONTROL",

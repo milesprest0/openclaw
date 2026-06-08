@@ -3,6 +3,7 @@ import {
   loadBundledEntryExportSync,
 } from "openclaw/plugin-sdk/channel-entry-contract";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/channel-entry-contract";
+import { registerSlackSubagentHooks } from "./subagent-hooks-api.js";
 
 function registerSlackPluginHttpRoutes(api: OpenClawPluginApi): void {
   const register = loadBundledEntryExportSync<(api: OpenClawPluginApi) => void>(import.meta.url, {
@@ -33,5 +34,8 @@ export default defineBundledChannelEntry({
     specifier: "./account-inspect-api.js",
     exportName: "inspectSlackReadOnlyAccount",
   },
-  registerFull: registerSlackPluginHttpRoutes,
+  registerFull(api) {
+    registerSlackSubagentHooks(api);
+    registerSlackPluginHttpRoutes(api);
+  },
 });
