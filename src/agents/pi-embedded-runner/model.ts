@@ -1072,6 +1072,26 @@ export async function resolveModelAsync(
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
 }> {
+  // TIER_ALLOWLIST_FORK_PATCH_018 — request-time tier enforcement. Policy lives in
+  // ~/.openclaw/patches/helpers/tier-enforce.cjs (repo-owned, unit-tested, fail-open;
+  // mode via PREST0N_TIER_ENFORCE: off|log|snap, default log).
+  try {
+    const __tierLib = (await import("node:module")).createRequire(import.meta.url)(
+      `${process.env.HOME}/.openclaw/patches/helpers/tier-enforce.cjs`,
+    );
+    const __tier = __tierLib.resolveTierModel({
+      requested: `${provider}/${modelId}`,
+      source: (options as { tierSource?: string } | undefined)?.tierSource,
+      marker: "TIER_ALLOWLIST_FORK_PATCH_018",
+    });
+    if (__tier.snapped) {
+      const __parts = String(__tier.model).split("/");
+      provider = __parts[0];
+      modelId = __parts.slice(1).join("/");
+    }
+  } catch {
+    /* fail-open: enforcement may never take a request down */
+  }
   const normalizedRef = {
     provider,
     model: normalizeStaticProviderModelId(normalizeProviderId(provider), modelId),
