@@ -12,6 +12,7 @@ import {
 } from "../../config/sessions.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
+import { buildPctFull, logTokenUsageRecord } from "../../logging/token-usage-log.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 
 function applyCliSessionIdToSessionPatch(
@@ -158,6 +159,27 @@ export async function persistSessionUsageUpdate(params: {
           // context utilization is stale/unknown.
           patch.totalTokens = totalTokens;
           patch.totalTokensFresh = typeof totalTokens === "number";
+          // Per-call token observability: emit one JSONL record per usage
+          // persist. Fire-and-forget; never blocks or breaks persistence.
+          void logTokenUsageRecord(
+            {
+              ts: new Date().toISOString(),
+              sessionKey,
+              model: params.modelUsed ?? entry.model,
+              provider: params.providerUsed ?? entry.modelProvider,
+              promptTokens: params.promptTokens,
+              lastCallInput: params.lastCallUsage?.input,
+              lastCallOutput: params.lastCallUsage?.output,
+              cacheRead: (params.lastCallUsage ?? params.usage)?.cacheRead,
+              cacheWrite: (params.lastCallUsage ?? params.usage)?.cacheWrite,
+              accumInput: params.usage?.input,
+              accumOutput: params.usage?.output,
+              contextMax: resolvedContextTokens,
+              totalTokens,
+              pctFull: buildPctFull(totalTokens, resolvedContextTokens),
+            },
+            cfg,
+          );
           return applyCliSessionIdToSessionPatch(params, entry, patch);
         },
       });
