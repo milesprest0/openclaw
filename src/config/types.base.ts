@@ -260,6 +260,12 @@ export type LoggingConfig = {
   redactSensitive?: "off" | "tools";
   /** Regex patterns used to redact sensitive tokens from logs and transcripts. */
   redactPatterns?: string[];
+  /**
+   * Emit one JSONL record per LLM API-call usage persist to
+   * `token-usage-<date>.jsonl` for per-call token observability.
+   * Default: enabled. Set to false to disable.
+   */
+  tokenUsageLog?: boolean;
 };
 
 export type DiagnosticsOtelConfig = {
