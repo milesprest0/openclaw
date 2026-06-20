@@ -186,6 +186,12 @@ function buildSendSchema(options: { includePresentation: boolean; includeDeliver
     filePath: Type.Optional(Type.String()),
     replyTo: Type.Optional(Type.String()),
     threadId: Type.Optional(Type.String()),
+    topLevel: Type.Optional(
+      Type.Boolean({
+        description:
+          "Force a top-level send with no thread inheritance. Explicit threadId still takes precedence.",
+      }),
+    ),
     asVoice: Type.Optional(Type.Boolean()),
     silent: Type.Optional(Type.Boolean()),
     quoteText: Type.Optional(

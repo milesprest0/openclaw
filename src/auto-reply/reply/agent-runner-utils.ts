@@ -19,6 +19,7 @@ import {
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
+  normalizeStringifiedOptionalString,
 } from "../../shared/string-coerce.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import type { TemplateContext } from "../templating.js";
@@ -107,6 +108,20 @@ export function buildThreadingToolContext(params: {
 }): ChannelThreadingToolContext {
   const { sessionCtx, config, hasRepliedRef } = params;
   const currentMessageId = sessionCtx.MessageSidFull ?? sessionCtx.MessageSid;
+  const topicId =
+    sessionCtx.MessageThreadId != null
+      ? normalizeStringifiedOptionalString(sessionCtx.MessageThreadId)
+      : undefined;
+  const replyToId = normalizeOptionalString(sessionCtx.ReplyToId ?? sessionCtx.ReplyToIdFull);
+  const threadTs = replyToId;
+  const turnThreadContext = {
+    ...(topicId ? { topicId } : {}),
+    ...(replyToId ? { replyToId } : {}),
+    ...(threadTs ? { threadTs } : {}),
+    isInboundThreadedTurn:
+      Boolean(normalizeOptionalString(sessionCtx.ThreadLabel)) &&
+      Boolean(topicId || replyToId || threadTs),
+  };
   const originProvider = resolveOriginMessageProvider({
     originatingChannel: sessionCtx.OriginatingChannel,
     provider: sessionCtx.Provider,
@@ -117,12 +132,14 @@ export function buildThreadingToolContext(params: {
   });
   if (!config) {
     return {
+      turnThreadContext,
       currentMessageId,
     };
   }
   const rawProvider = normalizeOptionalLowercaseString(originProvider);
   if (!rawProvider) {
     return {
+      turnThreadContext,
       currentMessageId,
     };
   }
@@ -131,6 +148,7 @@ export function buildThreadingToolContext(params: {
   const threading = provider ? getChannelPlugin(provider)?.threading : undefined;
   if (!threading?.buildToolContext) {
     return {
+      turnThreadContext,
       currentChannelId: normalizeOptionalString(originTo),
       currentChannelProvider: provider ?? (rawProvider as ChannelId),
       currentMessageId,
@@ -156,6 +174,7 @@ export function buildThreadingToolContext(params: {
     }) ?? {};
   return {
     ...context,
+    turnThreadContext,
     currentChannelProvider: provider!, // guaranteed non-null since threading exists
     currentMessageId: context.currentMessageId ?? currentMessageId,
   };

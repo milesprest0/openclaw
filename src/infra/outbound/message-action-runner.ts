@@ -837,6 +837,8 @@ async function handlePollAction(ctx: ResolvedActionContext): Promise<MessageActi
 
   const resolvedThreadId = resolveAndApplyOutboundThreadId(params, {
     cfg,
+    channel,
+    action,
     to,
     accountId,
     toolContext: input.toolContext,

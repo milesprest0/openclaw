@@ -260,4 +260,26 @@ describe("agent-runner-utils", () => {
       currentMessageId: "msg-9",
     });
   });
+
+  it("captures inbound turn thread context at tool-context ingress", () => {
+    const context = buildThreadingToolContext({
+      sessionCtx: {
+        Provider: "slack",
+        OriginatingChannel: "slack",
+        OriginatingTo: "channel:C123",
+        MessageThreadId: 77,
+        ReplyToId: "171.002",
+        ThreadLabel: "Slack thread #ops",
+      },
+      config: {},
+      hasRepliedRef: undefined,
+    });
+
+    expect(context.turnThreadContext).toEqual({
+      topicId: "77",
+      replyToId: "171.002",
+      threadTs: "171.002",
+      isInboundThreadedTurn: true,
+    });
+  });
 });

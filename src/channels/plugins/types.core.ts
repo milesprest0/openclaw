@@ -458,6 +458,12 @@ export type ChannelThreadingContext = {
 };
 
 export type ChannelThreadingToolContext = {
+  turnThreadContext?: {
+    topicId?: string;
+    replyToId?: string;
+    threadTs?: string;
+    isInboundThreadedTurn?: boolean;
+  };
   currentChannelId?: string;
   currentGraphChannelId?: string;
   currentChannelProvider?: ChannelId;

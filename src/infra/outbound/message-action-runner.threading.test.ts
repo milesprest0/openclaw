@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   prepareOutboundMirrorRoute,
@@ -34,6 +34,10 @@ describe("message action threading helpers", () => {
   beforeEach(() => {
     ensureOutboundSessionEntry.mockClear();
     resolveOutboundSessionRoute.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it.each([
@@ -112,6 +116,8 @@ describe("message action threading helpers", () => {
 
     const resolved = resolveAndApplyOutboundThreadId(actionParams, {
       cfg: forumConfig,
+      channel: "forum",
+      action: "send",
       to: testCase.target,
       toolContext: defaultForumToolContext,
       resolveAutoThreadId: ({ to, toolContext }) =>
@@ -132,6 +138,8 @@ describe("message action threading helpers", () => {
 
     const resolved = resolveAndApplyOutboundThreadId(actionParams, {
       cfg: forumConfig,
+      channel: "forum",
+      action: "send",
       to: "forum:123",
       toolContext: defaultForumToolContext,
       resolveAutoThreadId: () => "42",
@@ -152,6 +160,8 @@ describe("message action threading helpers", () => {
 
     const resolved = resolveAndApplyOutboundThreadId(actionParams, {
       cfg: forumConfig,
+      channel: "forum",
+      action: "send",
       to: "forum:123",
       toolContext: defaultForumToolContext,
       resolveAutoThreadId,
@@ -164,6 +174,136 @@ describe("message action threading helpers", () => {
     );
     expect(resolved).toBe("thread-777");
     expect(actionParams.threadId).toBe("thread-777");
+  });
+
+  it("auto-binds Slack send thread from inbound threaded turn context", () => {
+    const actionParams: Record<string, unknown> = {
+      channel: "slack",
+      target: "channel:C123",
+      message: "hi",
+    };
+
+    const resolved = resolveAndApplyOutboundThreadId(actionParams, {
+      cfg: workspaceConfig,
+      channel: "slack",
+      action: "send",
+      to: "channel:C123",
+      toolContext: {
+        turnThreadContext: {
+          topicId: "171.000",
+          replyToId: "171.111",
+          threadTs: "171.222",
+          isInboundThreadedTurn: true,
+        },
+      },
+      resolveAutoThreadId: () => "plugin-thread",
+    });
+
+    expect(resolved).toBe("171.000");
+    expect(actionParams.threadId).toBe("171.000");
+  });
+
+  it("keeps Slack send top-level for turns without inbound threaded context", () => {
+    const actionParams: Record<string, unknown> = {
+      channel: "slack",
+      target: "channel:C123",
+      message: "hi",
+    };
+
+    const resolved = resolveAndApplyOutboundThreadId(actionParams, {
+      cfg: workspaceConfig,
+      channel: "slack",
+      action: "send",
+      to: "channel:C123",
+      toolContext: {
+        turnThreadContext: {
+          isInboundThreadedTurn: false,
+        },
+      },
+      resolveAutoThreadId: () => "plugin-thread",
+    });
+
+    expect(resolved).toBeUndefined();
+    expect(actionParams.threadId).toBeUndefined();
+  });
+
+  it("honors explicit threadId for Slack cross-post sends", () => {
+    const actionParams: Record<string, unknown> = {
+      channel: "slack",
+      target: "channel:C123",
+      message: "hi",
+      threadId: "cross-post-thread",
+    };
+
+    const resolved = resolveAndApplyOutboundThreadId(actionParams, {
+      cfg: workspaceConfig,
+      channel: "slack",
+      action: "send",
+      to: "channel:C123",
+      toolContext: {
+        turnThreadContext: {
+          topicId: "171.000",
+          isInboundThreadedTurn: true,
+        },
+      },
+      resolveAutoThreadId: () => "plugin-thread",
+    });
+
+    expect(resolved).toBe("cross-post-thread");
+    expect(actionParams.threadId).toBe("cross-post-thread");
+  });
+
+  it("honors topLevel override for Slack sends", () => {
+    const actionParams: Record<string, unknown> = {
+      channel: "slack",
+      target: "channel:C123",
+      message: "hi",
+      topLevel: true,
+    };
+
+    const resolved = resolveAndApplyOutboundThreadId(actionParams, {
+      cfg: workspaceConfig,
+      channel: "slack",
+      action: "send",
+      to: "channel:C123",
+      toolContext: {
+        turnThreadContext: {
+          topicId: "171.000",
+          isInboundThreadedTurn: true,
+        },
+      },
+      resolveAutoThreadId: () => "plugin-thread",
+    });
+
+    expect(resolved).toBeUndefined();
+    expect(actionParams.threadId).toBeUndefined();
+    expect(actionParams.topLevel).toBeUndefined();
+  });
+
+  it("allows disabling Slack auto-bind guard via env flag", () => {
+    vi.stubEnv("OPENCLAW_SLACK_AUTO_BIND_INBOUND_THREAD", "0");
+    const actionParams: Record<string, unknown> = {
+      channel: "slack",
+      target: "channel:C123",
+      message: "hi",
+    };
+
+    const resolved = resolveAndApplyOutboundThreadId(actionParams, {
+      cfg: workspaceConfig,
+      channel: "slack",
+      action: "send",
+      to: "channel:C123",
+      toolContext: {
+        turnThreadContext: {
+          topicId: "171.000",
+          isInboundThreadedTurn: true,
+        },
+      },
+      resolveAutoThreadId: () => "plugin-thread",
+    });
+
+    expect(resolved).toBe("plugin-thread");
+    expect(actionParams.threadId).toBe("plugin-thread");
   });
 
   it("inherits currentMessageId for same-target sends when replyToMode=all", () => {
