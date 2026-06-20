@@ -1576,6 +1576,38 @@ export async function dispatchReplyFromConfig(
       }
     }
 
+    // Deterministic empty-completion guard: when the turn was supposed to deliver
+    // (`!suppressDelivery`) and the model produced reply payloads, but every one was a
+    // reasoning/thinking payload that got skipped above (`attemptedFinalDelivery` still
+    // false), the channel would otherwise emit a silent turn (dispatch_silent: no final,
+    // no tool, no block). That is the reasoning-only-completion failure mode. Promote the
+    // last reasoning payload that carries visible text to a real final so the user is
+    // never left silent on a turn they were owed a reply for.
+    //
+    // This cannot fire on intentional silence: a NO_REPLY/lurk yields zero reply payloads
+    // (`replies.length === 0`), suppressed/message-tool-only turns set `suppressDelivery`,
+    // and any normal final sets `attemptedFinalDelivery` true. It runs once, synchronously,
+    // and once it delivers, `attemptedFinalDelivery` flips true so the success-clear block
+    // and counts accounting stay idempotent (no double-send).
+    if (!suppressDelivery && !attemptedFinalDelivery && replies.length > 0) {
+      const reasoningFallback = [...replies]
+        .reverse()
+        .find((reply) => reply.isReasoning === true && (reply.text ?? "").trim().length > 0);
+      if (reasoningFallback) {
+        const promotedFinal: ReplyPayload = { ...reasoningFallback, isReasoning: false };
+        logVerbose(
+          `dispatch-from-config: empty-completion guard promoting reasoning-only payload to final (session=${sessionKey ?? "unknown"})`,
+        );
+        attemptedFinalDelivery = true;
+        const finalReply = await sendFinalPayload(promotedFinal);
+        queuedFinal = finalReply.queuedFinal || queuedFinal;
+        routedFinalCount += finalReply.routedFinalCount;
+        if (!finalReply.queuedFinal && finalReply.routedFinalCount === 0) {
+          finalDeliveryFailed = true;
+        }
+      }
+    }
+
     if (attemptedFinalDelivery && !finalDeliveryFailed) {
       await clearPendingFinalDeliveryAfterSuccess({
         storePath: sessionStoreEntry.storePath,

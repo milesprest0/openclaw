@@ -3920,6 +3920,79 @@ describe("dispatchReplyFromConfig", () => {
     expect(finalCalls[0][0]).toMatchObject({ text: "The answer is 42" });
   });
 
+  it("empty-completion guard: promotes a reasoning-only completion to a final (not suppressed)", async () => {
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({ Provider: "whatsapp" });
+    // Model produced ONLY reasoning payloads -> normal loop skips them all.
+    const replyResolver = async () =>
+      [
+        { text: "let me think...", isReasoning: true },
+        { text: "The answer is 42", isReasoning: true },
+      ] satisfies ReplyPayload[];
+    const result = await dispatchReplyFromConfig({
+      ctx,
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver,
+    });
+    const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+    // Guard promotes the LAST reasoning payload with text, delivered exactly once.
+    expect(finalCalls).toHaveLength(1);
+    expect(finalCalls[0][0]).toMatchObject({ text: "The answer is 42", isReasoning: false });
+    expect(result.queuedFinal).toBe(true);
+  });
+
+  it("empty-completion guard: does NOT fire when delivery is suppressed", async () => {
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    // message_tool_only suppresses automatic source delivery.
+    const ctx = buildTestCtx({ Provider: "whatsapp" });
+    const replyResolver = async () =>
+      [{ text: "thinking only", isReasoning: true }] satisfies ReplyPayload[];
+    await dispatchReplyFromConfig({
+      ctx,
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver,
+      replyOptions: { sourceReplyDeliveryMode: "message_tool_only" },
+    });
+    const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+    expect(finalCalls).toHaveLength(0);
+  });
+
+  it("empty-completion guard: does NOT fire on intentional silence (zero reply payloads)", async () => {
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({ Provider: "whatsapp" });
+    const replyResolver = async () => undefined;
+    const result = await dispatchReplyFromConfig({
+      ctx,
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver,
+    });
+    const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+    expect(finalCalls).toHaveLength(0);
+    expect(result.queuedFinal).toBe(false);
+  });
+
+  it("empty-completion guard: does NOT double-send when a real final was delivered", async () => {
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({ Provider: "whatsapp" });
+    const replyResolver = async () =>
+      [
+        { text: "thinking...", isReasoning: true },
+        { text: "The answer is 42" },
+      ] satisfies ReplyPayload[];
+    await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+    const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+    // Only the real final is sent; guard is skipped because attemptedFinalDelivery is true.
+    expect(finalCalls).toHaveLength(1);
+    expect(finalCalls[0][0]).toMatchObject({ text: "The answer is 42" });
+  });
+
   it("suppresses isReasoning payloads from block replies (generic dispatch path)", async () => {
     setNoAbort();
     const dispatcher = createDispatcher();
