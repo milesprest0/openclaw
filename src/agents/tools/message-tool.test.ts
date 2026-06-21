@@ -617,6 +617,45 @@ describe("message tool Telegram topic targets", () => {
   });
 });
 
+describe("message tool schema diet", () => {
+  it("keeps schema chars below the pre-phase1 baseline", () => {
+    const tool = createMessageTool();
+    const serialized = JSON.stringify(tool.parameters);
+
+    expect(serialized.length).toBeLessThan(5_792);
+    expect((tool.parameters as { properties?: Record<string, unknown> }).properties).toHaveProperty(
+      "extra",
+    );
+  });
+
+  it("round-trips provider-specific passthrough args from extra", async () => {
+    mockSendResult();
+
+    const call = await executeSend({
+      action: {
+        message: "hello",
+        extra: {
+          effectId: "invisible-ink",
+          quoteText: "quoted",
+          forceDocument: true,
+          threadName: "ops-thread",
+          startTime: "2026-06-21T10:00:00Z",
+        },
+      },
+    });
+
+    expect(call?.params).toEqual(
+      expect.objectContaining({
+        effectId: "invisible-ink",
+        quoteText: "quoted",
+        forceDocument: true,
+        threadName: "ops-thread",
+        startTime: "2026-06-21T10:00:00Z",
+      }),
+    );
+  });
+});
+
 describe("message tool schema scoping", () => {
   const telegramPlugin = createChannelPlugin({
     id: "telegram",

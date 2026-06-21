@@ -1400,6 +1400,16 @@ export const FIELD_HELP: Record<string, string> = {
     "Maximum inline image payloads retained in live context (default: 8). Older images beyond this count are replaced by a short text placeholder, keeping the newest images.",
   "agents.defaults.contextBudget.reserveTokens":
     "Headroom (tokens) reserved for the model response, subtracted from maxAssembledTokens when computing the trim threshold (default: 20000).",
+  "agents.defaults.contextBudget.targetBand":
+    "Optional deterministic assembled-context target band. When set, the context budget guard maps to this band (for example max=32000 with reserve tuned near 4000) so preflight trimming stays in the target range.",
+  "agents.defaults.contextBudget.targetBand.min":
+    "Optional lower bound for assembled-context targeting. This is advisory for diagnostics/rollout and does not relax the max ceiling enforcement.",
+  "agents.defaults.contextBudget.targetBand.max":
+    "Optional hard upper bound for assembled-context targeting. When set, the budget guard caps maxAssembledTokens to this value and trims deterministically before prompt submission.",
+  "agents.defaults.toolExposure":
+    "Prompt-time tool exposure policy. Use this to keep low-frequency tools out of the default advertised tool list until the user prompt indicates intent.",
+  "agents.defaults.toolExposure.lazy":
+    "Enable intent-driven lazy exposure for low-frequency tools (default: false). Core tools remain always available.",
   "agents.defaults.embeddedPi":
     "Embedded Pi runner hardening controls for how workspace-local Pi settings are trusted and applied in OpenClaw sessions.",
   "agents.defaults.embeddedPi.projectSettingsPolicy":

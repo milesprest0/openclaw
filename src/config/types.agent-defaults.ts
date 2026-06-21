@@ -303,6 +303,8 @@ export type AgentDefaultsConfig = {
    * AgentContextBudgetConfig.
    */
   contextBudget?: AgentContextBudgetConfig;
+  /** Tool exposure defaults for prompt-time tool lists. */
+  toolExposure?: AgentToolExposureConfig;
   /** Embedded Pi runner hardening and compatibility controls. */
   embeddedPi?: {
     /**
@@ -485,6 +487,8 @@ export type AgentContextBudgetConfig = {
   reserveTokens?: number;
   /** Optional tenant override key for fleet-shared defaults. */
   overrideKey?: string;
+  /** Optional deterministic target band for assembled context budgeting. */
+  targetBand?: AgentContextBudgetTargetBandConfig;
   /** Optional per-tenant context-budget overrides keyed by overrideKey/account id. */
   overrides?: Record<string, AgentContextBudgetOverrideConfig>;
 };
@@ -494,6 +498,17 @@ export type AgentContextBudgetOverrideConfig = {
   maxAssembledTokens?: number;
   perThreadMaxImages?: number;
   reserveTokens?: number;
+  targetBand?: AgentContextBudgetTargetBandConfig;
+};
+
+export type AgentContextBudgetTargetBandConfig = {
+  min?: number;
+  max?: number;
+};
+
+export type AgentToolExposureConfig = {
+  /** Enable intent-driven lazy exposure for low-frequency tools (default: false). */
+  lazy?: boolean;
 };
 
 export type AgentCompactionMode = "default" | "safeguard";

@@ -3,6 +3,7 @@ import { estimateTokens } from "@mariozechner/pi-coding-agent";
 import type {
   AgentContextBudgetConfig,
   AgentContextBudgetOverrideConfig,
+  AgentContextBudgetTargetBandConfig,
 } from "../../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { normalizeOptionalAccountId } from "../../../routing/session-key.js";
@@ -28,6 +29,10 @@ export type ResolvedContextBudget = {
   reserveTokens: number;
   budgetBeforeReserve: number;
   perThreadMaxImages: number;
+  targetBand?: {
+    min: number;
+    max: number;
+  };
   overrideKey?: string;
 };
 
@@ -35,8 +40,11 @@ export type ContextBudgetGuardResult = {
   messages: AgentMessage[];
   estimatedTokens: number;
   budgetBeforeReserve: number;
+  maxAssembledTokens: number;
+  reserveTokens: number;
   imageBlocksPruned: number;
   droppedTurns: number;
+  targetBandEnabled: boolean;
   applied: boolean;
 };
 
@@ -54,6 +62,23 @@ function normalizeNonNegativeInt(value: unknown): number | undefined {
   }
   const next = Math.floor(value);
   return next >= 0 ? next : undefined;
+}
+
+function normalizeTargetBand(value: AgentContextBudgetTargetBandConfig | undefined):
+  | {
+      min: number;
+      max: number;
+    }
+  | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const min = normalizePositiveInt(value.min);
+  const max = normalizePositiveInt(value.max);
+  if (!min || !max || max < min) {
+    return undefined;
+  }
+  return { min, max };
 }
 
 function resolveTenantOverride(params: {
@@ -95,16 +120,28 @@ export function resolveContextBudget(params: {
   };
 
   const enabled = merged.enabled ?? true;
+  const targetBand = normalizeTargetBand(merged.targetBand);
   const maxAssembledTokens = Math.min(
     contextWindowTokens,
-    normalizePositiveInt(merged.maxAssembledTokens) ??
+    targetBand?.max ??
+      normalizePositiveInt(merged.maxAssembledTokens) ??
       Math.max(1, Math.floor(contextWindowTokens * DEFAULT_MAX_ASSEMBLED_RATIO)),
   );
+  const defaultReserveTokens = (() => {
+    if (!targetBand) {
+      return DEFAULT_RESERVE_TOKENS;
+    }
+    const targetBudgetBeforeReserve = Math.max(
+      1,
+      Math.min(maxAssembledTokens - 1, Math.floor(targetBand.max * 0.875)),
+    );
+    return Math.max(0, maxAssembledTokens - targetBudgetBeforeReserve);
+  })();
   const reserveTokens = Math.max(
     0,
     Math.min(
       maxAssembledTokens - 1,
-      normalizeNonNegativeInt(merged.reserveTokens) ?? DEFAULT_RESERVE_TOKENS,
+      normalizeNonNegativeInt(merged.reserveTokens) ?? defaultReserveTokens,
     ),
   );
   const budgetBeforeReserve = Math.max(1, maxAssembledTokens - reserveTokens);
@@ -117,6 +154,7 @@ export function resolveContextBudget(params: {
     reserveTokens,
     budgetBeforeReserve,
     perThreadMaxImages,
+    ...(targetBand ? { targetBand } : {}),
     overrideKey,
   };
 }
@@ -262,8 +300,11 @@ export function applyContextBudgetGuard(params: {
       messages: currentMessages,
       estimatedTokens,
       budgetBeforeReserve: budget.budgetBeforeReserve,
+      maxAssembledTokens: budget.maxAssembledTokens,
+      reserveTokens: budget.reserveTokens,
       imageBlocksPruned: aged.prunedCount,
       droppedTurns,
+      targetBandEnabled: !!budget.targetBand,
       applied: aged.prunedCount > 0,
     };
   }
@@ -298,8 +339,11 @@ export function applyContextBudgetGuard(params: {
     messages: currentMessages,
     estimatedTokens,
     budgetBeforeReserve: budget.budgetBeforeReserve,
+    maxAssembledTokens: budget.maxAssembledTokens,
+    reserveTokens: budget.reserveTokens,
     imageBlocksPruned: aged.prunedCount,
     droppedTurns,
+    targetBandEnabled: !!budget.targetBand,
     applied: aged.prunedCount > 0 || droppedTurns > 0,
   };
 }

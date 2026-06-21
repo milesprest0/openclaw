@@ -168,12 +168,20 @@ describe("agent defaults schema", () => {
         maxAssembledTokens: 120_000,
         perThreadMaxImages: 8,
         reserveTokens: 20_000,
+        targetBand: {
+          min: 16_000,
+          max: 32_000,
+        },
         overrideKey: "tenant-shared",
         overrides: {
           "tenant-shared": {
             maxAssembledTokens: 90_000,
             perThreadMaxImages: 4,
             reserveTokens: 10_000,
+            targetBand: {
+              min: 14_000,
+              max: 28_000,
+            },
           },
         },
       },
@@ -181,6 +189,17 @@ describe("agent defaults schema", () => {
 
     expect(defaults.contextBudget?.overrideKey).toBe("tenant-shared");
     expect(defaults.contextBudget?.overrides?.["tenant-shared"]?.perThreadMaxImages).toBe(4);
+    expect(defaults.contextBudget?.targetBand?.max).toBe(32_000);
+  });
+
+  it("accepts agents.defaults.toolExposure.lazy", () => {
+    const defaults = AgentDefaultsSchema.parse({
+      toolExposure: {
+        lazy: true,
+      },
+    })!;
+
+    expect(defaults.toolExposure?.lazy).toBe(true);
   });
 
   it("accepts positive heartbeat timeoutSeconds on defaults and agent entries", () => {

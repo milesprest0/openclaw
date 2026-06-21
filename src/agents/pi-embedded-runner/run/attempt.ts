@@ -181,7 +181,10 @@ import { isRunnerAbortError } from "../abort.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "../cache-ttl.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
 import { runContextEngineMaintenance } from "../context-engine-maintenance.js";
-import { applyFinalEffectiveToolPolicy } from "../effective-tool-policy.js";
+import {
+  applyFinalEffectiveToolPolicy,
+  applyLazyToolExposurePolicy,
+} from "../effective-tool-policy.js";
 import { buildEmbeddedExtensionFactories } from "../extensions.js";
 import {
   applyExtraParamsToAgent,
@@ -1132,7 +1135,11 @@ export async function runEmbeddedAttempt(
       ownerOnlyToolAllowlist: params.ownerOnlyToolAllowlist,
       warn: (message) => log.warn(message),
     });
-    const effectiveTools = [...tools, ...filteredBundledTools];
+    const effectiveTools = applyLazyToolExposurePolicy({
+      tools: [...tools, ...filteredBundledTools],
+      config: params.config,
+      userIntentText: params.prompt,
+    });
     prepStages.mark("bundle-tools");
     const allowedToolNames = collectAllowedToolNames({
       tools: effectiveTools,
@@ -3076,8 +3083,11 @@ export async function runEmbeddedAttempt(
                 messages: activeSession.messages,
                 estimatedTokens: 0,
                 budgetBeforeReserve: contextTokenBudget,
+                maxAssembledTokens: contextTokenBudget,
+                reserveTokens: 0,
                 imageBlocksPruned: 0,
                 droppedTurns: 0,
+                targetBandEnabled: false,
                 applied: false,
               };
             }
@@ -3090,9 +3100,28 @@ export async function runEmbeddedAttempt(
                 `budget=${contextBudgetGuard.budgetBeforeReserve} imageBlocksPruned=${contextBudgetGuard.imageBlocksPruned} ` +
                 `droppedTurns=${contextBudgetGuard.droppedTurns}`,
             );
+            emitTrustedDiagnosticEvent({
+              type: "context.gate.applied",
+              runId: params.runId,
+              ...(params.sessionKey && { sessionKey: params.sessionKey }),
+              ...(params.sessionId && { sessionId: params.sessionId }),
+              provider: params.provider,
+              model: params.modelId,
+              trigger: params.trigger,
+              estimatedTokens: contextBudgetGuard.estimatedTokens,
+              budgetBeforeReserve: contextBudgetGuard.budgetBeforeReserve,
+              maxAssembledTokens: contextBudgetGuard.maxAssembledTokens,
+              reserveTokens: contextBudgetGuard.reserveTokens,
+              imageBlocksPruned: contextBudgetGuard.imageBlocksPruned,
+              droppedTurns: contextBudgetGuard.droppedTurns,
+              targetBandEnabled: contextBudgetGuard.targetBandEnabled,
+              trace: freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(runTrace)),
+            });
           }
           const sessionSummary = summarizeSessionContext(activeSession.messages);
-          const reserveTokens = settingsManager.getCompactionReserveTokens();
+          const reserveTokens = contextBudgetGuard.targetBandEnabled
+            ? contextBudgetGuard.reserveTokens
+            : settingsManager.getCompactionReserveTokens();
           emitTrustedDiagnosticEvent({
             type: "context.assembled",
             runId: params.runId,
@@ -3170,10 +3199,14 @@ export async function runEmbeddedAttempt(
                   : {}),
                 systemPrompt: systemPromptForHook,
                 prompt: promptForModel,
-                contextTokenBudget,
+                contextTokenBudget: contextBudgetGuard.targetBandEnabled
+                  ? contextBudgetGuard.maxAssembledTokens
+                  : contextTokenBudget,
                 reserveTokens,
                 toolResultMaxChars: resolveLiveToolResultMaxChars({
-                  contextWindowTokens: contextTokenBudget,
+                  contextWindowTokens: contextBudgetGuard.targetBandEnabled
+                    ? contextBudgetGuard.maxAssembledTokens
+                    : contextTokenBudget,
                   cfg: params.config,
                   agentId: sessionAgentId,
                 }),

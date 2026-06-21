@@ -504,6 +504,23 @@ export type DiagnosticContextAssembledEvent = DiagnosticBaseEvent & {
   reserveTokens?: number;
 };
 
+export type DiagnosticContextGateAppliedEvent = DiagnosticBaseEvent & {
+  type: "context.gate.applied";
+  runId: string;
+  sessionKey?: string;
+  sessionId?: string;
+  provider: string;
+  model: string;
+  trigger?: string;
+  estimatedTokens: number;
+  budgetBeforeReserve: number;
+  maxAssembledTokens: number;
+  reserveTokens: number;
+  imageBlocksPruned: number;
+  droppedTurns: number;
+  targetBandEnabled: boolean;
+};
+
 export type DiagnosticMemoryUsage = {
   rssBytes: number;
   heapTotalBytes: number;
@@ -608,6 +625,7 @@ export type DiagnosticEventPayload =
   | DiagnosticModelCallCompletedEvent
   | DiagnosticModelCallErrorEvent
   | DiagnosticContextAssembledEvent
+  | DiagnosticContextGateAppliedEvent
   | DiagnosticMemorySampleEvent
   | DiagnosticMemoryPressureEvent
   | DiagnosticPayloadLargeEvent
@@ -665,6 +683,7 @@ const ASYNC_DIAGNOSTIC_EVENT_TYPES = new Set<DiagnosticEventPayload["type"]>([
   "harness.run.completed",
   "harness.run.error",
   "context.assembled",
+  "context.gate.applied",
   "log.record",
 ]);
 
