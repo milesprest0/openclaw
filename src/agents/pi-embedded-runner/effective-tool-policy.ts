@@ -60,6 +60,61 @@ type FinalEffectiveToolPolicyParams = {
   warn: (message: string) => void;
 };
 
+type LazyToolExposureParams = {
+  tools: AnyAgentTool[];
+  config?: OpenClawConfig;
+  userIntentText?: string;
+};
+
+const CORE_ALWAYS_ON_TOOLS = new Set([
+  "message",
+  "exec",
+  "read",
+  "edit",
+  "sessions_spawn",
+  "sessions_send",
+  "sessions_yield",
+]);
+
+const LAZY_TOOL_INTENT_MATCHERS: Array<{ tool: string; pattern: RegExp }> = [
+  {
+    tool: "image_generate",
+    pattern: /\b(image|images|photo|picture|screenshot|logo|illustration|avatar)\b/iu,
+  },
+  { tool: "music_generate", pattern: /\b(music|song|melody|audio track|soundtrack|beat)\b/iu },
+  { tool: "video_generate", pattern: /\b(video|clip|movie|animation|gif)\b/iu },
+  { tool: "pdf", pattern: /\b(pdf|document|paper|scan|transcript file)\b/iu },
+  { tool: "nodes", pattern: /\b(nodes?|workflow|flow|canvas)\b/iu },
+];
+
+export function applyLazyToolExposurePolicy(params: LazyToolExposureParams): AnyAgentTool[] {
+  if (params.tools.length === 0) {
+    return params.tools;
+  }
+  const lazyEnabled = params.config?.agents?.defaults?.toolExposure?.lazy === true;
+  if (!lazyEnabled) {
+    return params.tools;
+  }
+  const intentText = (params.userIntentText ?? "").trim();
+  const intentMatchedTools = new Set<string>();
+  for (const matcher of LAZY_TOOL_INTENT_MATCHERS) {
+    if (matcher.pattern.test(intentText)) {
+      intentMatchedTools.add(matcher.tool);
+    }
+  }
+
+  return params.tools.filter((tool) => {
+    if (CORE_ALWAYS_ON_TOOLS.has(tool.name)) {
+      return true;
+    }
+    const hasLazyMatcher = LAZY_TOOL_INTENT_MATCHERS.some((matcher) => matcher.tool === tool.name);
+    if (!hasLazyMatcher) {
+      return true;
+    }
+    return intentMatchedTools.has(tool.name);
+  });
+}
+
 export function applyFinalEffectiveToolPolicy(
   params: FinalEffectiveToolPolicyParams,
 ): AnyAgentTool[] {

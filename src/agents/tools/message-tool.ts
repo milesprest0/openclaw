@@ -43,6 +43,52 @@ const EXPLICIT_TARGET_ACTIONS = new Set<ChannelMessageActionName>([
   "broadcast",
 ]);
 
+const MESSAGE_TOOL_EXTRA_KEYS = [
+  "activityName",
+  "activityState",
+  "activityType",
+  "activityUrl",
+  "appliedTags",
+  "asDocument",
+  "autoArchiveMin",
+  "categoryId",
+  "clearParent",
+  "deleteDays",
+  "desc",
+  "durationMin",
+  "effect",
+  "effectId",
+  "emojiName",
+  "endTime",
+  "eventName",
+  "eventType",
+  "forceDocument",
+  "gatewayToken",
+  "gatewayUrl",
+  "gifPlayback",
+  "image",
+  "location",
+  "name",
+  "nsfw",
+  "parentId",
+  "position",
+  "query",
+  "quoteText",
+  "rateLimitPerUser",
+  "reason",
+  "startTime",
+  "status",
+  "stickerDesc",
+  "stickerId",
+  "stickerName",
+  "stickerTags",
+  "threadName",
+  "timeoutMs",
+  "topic",
+  "type",
+  "until",
+] as const;
+
 function actionNeedsExplicitTarget(action: ChannelMessageActionName): boolean {
   return EXPLICIT_TARGET_ACTIONS.has(action);
 }
@@ -160,25 +206,9 @@ const presentationMessageSchema = Type.Object(
 function buildSendSchema(options: { includePresentation: boolean; includeDeliveryPin: boolean }) {
   const props: Record<string, TSchema> = {
     message: Type.Optional(Type.String()),
-    effectId: Type.Optional(
-      Type.String({
-        description: "Message effect name/id for sendWithEffect (e.g., invisible ink).",
-      }),
-    ),
-    effect: Type.Optional(
-      Type.String({ description: "Alias for effectId (e.g., invisible-ink, balloons)." }),
-    ),
-    media: Type.Optional(
-      Type.String({
-        description: "Media URL or local path. data: URLs are not supported here, use buffer.",
-      }),
-    ),
+    media: Type.Optional(Type.String()),
     filename: Type.Optional(Type.String()),
-    buffer: Type.Optional(
-      Type.String({
-        description: "Base64 payload for attachments (optionally a data: URL).",
-      }),
-    ),
+    buffer: Type.Optional(Type.String()),
     contentType: Type.Optional(Type.String()),
     mimeType: Type.Optional(Type.String()),
     caption: Type.Optional(Type.String()),
@@ -186,30 +216,10 @@ function buildSendSchema(options: { includePresentation: boolean; includeDeliver
     filePath: Type.Optional(Type.String()),
     replyTo: Type.Optional(Type.String()),
     threadId: Type.Optional(Type.String()),
-    topLevel: Type.Optional(
-      Type.Boolean({
-        description:
-          "Force a top-level send with no thread inheritance. Explicit threadId still takes precedence.",
-      }),
-    ),
+    topLevel: Type.Optional(Type.Boolean()),
     asVoice: Type.Optional(Type.Boolean()),
     silent: Type.Optional(Type.Boolean()),
-    quoteText: Type.Optional(
-      Type.String({ description: "Quote text for Telegram reply_parameters" }),
-    ),
     bestEffort: Type.Optional(Type.Boolean()),
-    gifPlayback: Type.Optional(Type.Boolean()),
-    forceDocument: Type.Optional(
-      Type.Boolean({
-        description: "Send image/GIF as document to avoid Telegram compression (Telegram only).",
-      }),
-    ),
-    asDocument: Type.Optional(
-      Type.Boolean({
-        description:
-          "Send image/GIF as document to avoid Telegram compression. Alias for forceDocument (Telegram only).",
-      }),
-    ),
   };
   if (options.includePresentation) {
     props.presentation = Type.Optional(presentationMessageSchema);
@@ -243,30 +253,14 @@ function buildReactionSchema() {
   return {
     messageId: Type.Optional(
       Type.String({
-        description:
-          "Target message id for read, reaction, edit, delete, pin, or unpin. If omitted for reaction-like actions, defaults to the current inbound message id when available.",
+        description: "Target message id for read, reaction, edit, delete, pin, or unpin actions.",
       }),
     ),
-    message_id: Type.Optional(
-      Type.String({
-        // Intentional duplicate alias for tool-schema discoverability in LLMs.
-        description:
-          "snake_case alias of messageId. If omitted for reaction-like actions, defaults to the current inbound message id when available.",
-      }),
-    ),
+    message_id: Type.Optional(Type.String()),
     emoji: Type.Optional(Type.String()),
     remove: Type.Optional(Type.Boolean()),
-    trackToolCalls: Type.Optional(
-      Type.Boolean({
-        description:
-          "When true for a reaction to the current inbound message, use that reacted message as the status-reaction target for subsequent tool progress when the channel supports it.",
-      }),
-    ),
-    track_tool_calls: Type.Optional(
-      Type.Boolean({
-        description: "snake_case alias of trackToolCalls.",
-      }),
-    ),
+    trackToolCalls: Type.Optional(Type.Boolean()),
+    track_tool_calls: Type.Optional(Type.Boolean()),
     targetAuthor: Type.Optional(Type.String()),
     targetAuthorUuid: Type.Optional(Type.String()),
     groupId: Type.Optional(Type.String()),
@@ -275,6 +269,7 @@ function buildReactionSchema() {
 
 function buildFetchSchema() {
   return {
+    fileId: Type.Optional(Type.String()),
     limit: Type.Optional(Type.Number()),
     pageSize: Type.Optional(Type.Number()),
     pageToken: Type.Optional(Type.String()),
@@ -289,33 +284,10 @@ function buildFetchSchema() {
 function buildPollSchema() {
   const props: Record<string, TSchema> = {
     pollId: Type.Optional(Type.String()),
-    pollOptionId: Type.Optional(
-      Type.String({
-        description: "Poll answer id to vote for. Use when the channel exposes stable answer ids.",
-      }),
-    ),
-    pollOptionIds: Type.Optional(
-      Type.Array(
-        Type.String({
-          description:
-            "Poll answer ids to vote for in a multiselect poll. Use when the channel exposes stable answer ids.",
-        }),
-      ),
-    ),
-    pollOptionIndex: Type.Optional(
-      Type.Number({
-        description:
-          "1-based poll option number to vote for, matching the rendered numbered poll choices.",
-      }),
-    ),
-    pollOptionIndexes: Type.Optional(
-      Type.Array(
-        Type.Number({
-          description:
-            "1-based poll option numbers to vote for in a multiselect poll, matching the rendered numbered poll choices.",
-        }),
-      ),
-    ),
+    pollOptionId: Type.Optional(Type.String()),
+    pollOptionIds: Type.Optional(Type.Array(Type.String())),
+    pollOptionIndex: Type.Optional(Type.Number()),
+    pollOptionIndexes: Type.Optional(Type.Array(Type.Number())),
   };
   for (const name of SHARED_POLL_CREATION_PARAM_NAMES) {
     const def = POLL_CREATION_PARAM_DEFS[name];
@@ -366,100 +338,12 @@ function buildChannelTargetSchema() {
   };
 }
 
-function buildStickerSchema() {
+function buildMessageExtraSchema() {
+  const passthroughKeys = MESSAGE_TOOL_EXTRA_KEYS.join(", ");
   return {
-    fileId: Type.Optional(Type.String()),
-    emojiName: Type.Optional(Type.String()),
-    stickerId: Type.Optional(Type.Array(Type.String())),
-    stickerName: Type.Optional(Type.String()),
-    stickerDesc: Type.Optional(Type.String()),
-    stickerTags: Type.Optional(Type.String()),
-  };
-}
-
-function buildThreadSchema() {
-  return {
-    threadName: Type.Optional(Type.String()),
-    autoArchiveMin: Type.Optional(Type.Number()),
-    appliedTags: Type.Optional(Type.Array(Type.String())),
-  };
-}
-
-function buildEventSchema() {
-  return {
-    query: Type.Optional(Type.String()),
-    eventName: Type.Optional(Type.String()),
-    eventType: Type.Optional(Type.String()),
-    startTime: Type.Optional(Type.String()),
-    endTime: Type.Optional(Type.String()),
-    desc: Type.Optional(Type.String()),
-    location: Type.Optional(Type.String()),
-    image: Type.Optional(
-      Type.String({ description: "Cover image URL or local file path for the event." }),
-    ),
-    durationMin: Type.Optional(Type.Number()),
-    until: Type.Optional(Type.String()),
-  };
-}
-
-function buildModerationSchema() {
-  return {
-    reason: Type.Optional(Type.String()),
-    deleteDays: Type.Optional(Type.Number()),
-  };
-}
-
-function buildGatewaySchema() {
-  return {
-    gatewayUrl: Type.Optional(Type.String()),
-    gatewayToken: Type.Optional(Type.String()),
-    timeoutMs: Type.Optional(Type.Number()),
-  };
-}
-
-function buildPresenceSchema() {
-  return {
-    activityType: Type.Optional(
-      Type.String({
-        description: "Activity type: playing, streaming, listening, watching, competing, custom.",
-      }),
-    ),
-    activityName: Type.Optional(
-      Type.String({
-        description: "Activity name shown in sidebar (e.g. 'with fire'). Ignored for custom type.",
-      }),
-    ),
-    activityUrl: Type.Optional(
-      Type.String({
-        description:
-          "Streaming URL (Twitch or YouTube). Only used with streaming type; may not render for bots.",
-      }),
-    ),
-    activityState: Type.Optional(
-      Type.String({
-        description:
-          "State text. For custom type this is the status text; for others it shows in the flyout.",
-      }),
-    ),
-    status: Type.Optional(
-      Type.String({ description: "Bot status: online, dnd, idle, invisible." }),
-    ),
-  };
-}
-
-function buildChannelManagementSchema() {
-  return {
-    name: Type.Optional(Type.String()),
-    type: Type.Optional(Type.Number()),
-    parentId: Type.Optional(Type.String()),
-    topic: Type.Optional(Type.String()),
-    position: Type.Optional(Type.Number()),
-    nsfw: Type.Optional(Type.Boolean()),
-    rateLimitPerUser: Type.Optional(Type.Number()),
-    categoryId: Type.Optional(Type.String()),
-    clearParent: Type.Optional(
-      Type.Boolean({
-        description: "Clear the parent/category when supported by the provider.",
+    extra: Type.Optional(
+      Type.Record(Type.String(), Type.Unknown(), {
+        description: `Provider-specific optional args passthrough. Common keys: ${passthroughKeys}.`,
       }),
     ),
   };
@@ -477,15 +361,21 @@ function buildMessageToolSchemaProps(options: {
     ...buildFetchSchema(),
     ...buildPollSchema(),
     ...buildChannelTargetSchema(),
-    ...buildStickerSchema(),
-    ...buildThreadSchema(),
-    ...buildEventSchema(),
-    ...buildModerationSchema(),
-    ...buildGatewaySchema(),
-    ...buildChannelManagementSchema(),
-    ...buildPresenceSchema(),
+    ...buildMessageExtraSchema(),
     ...options.extraProperties,
   };
+}
+
+function applyMessageExtraParams(params: Record<string, unknown>): void {
+  const extraValue = params.extra;
+  if (!extraValue || typeof extraValue !== "object" || Array.isArray(extraValue)) {
+    return;
+  }
+  for (const [key, value] of Object.entries(extraValue as Record<string, unknown>)) {
+    if (!(key in params)) {
+      params[key] = value;
+    }
+  }
 }
 
 function buildMessageToolSchemaFromActions(
@@ -776,6 +666,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
           params[field] = stripFormattedReasoningMessage(params[field]);
         }
       }
+      applyMessageExtraParams(params);
       params.presentation = sanitizePresentationTextFields(params.presentation);
 
       const action = readStringParam(params, "action", {

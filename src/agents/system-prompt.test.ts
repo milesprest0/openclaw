@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { typedCases } from "../test-utils/typed-cases.js";
 import { buildSubagentSystemPrompt } from "./subagent-system-prompt.js";
-import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "./system-prompt-cache-boundary.js";
+import {
+  SYSTEM_PROMPT_CACHE_BOUNDARY,
+  splitSystemPromptCacheBoundary,
+} from "./system-prompt-cache-boundary.js";
 import {
   appendAgentBootstrapSystemPromptSupplement,
   buildAgentBootstrapSystemContext,
@@ -11,6 +14,7 @@ import {
   buildAgentSystemPrompt,
   buildRuntimeLine,
 } from "./system-prompt.js";
+import { createMessageTool } from "./tools/message-tool.js";
 
 describe("buildAgentSystemPrompt", () => {
   it("formats owner section for plain, hash, and missing owner lists", () => {
@@ -1080,6 +1084,39 @@ describe("buildAgentSystemPrompt", () => {
     expect(groupChatPos).toBeGreaterThan(boundaryPos);
     expect(reactionsPos).toBeGreaterThan(boundaryPos);
     expect(voicePos).toBeGreaterThan(boundaryPos);
+  });
+
+  it("keeps serialized message schema + stable prefix byte-identical across repeated builds", () => {
+    const firstPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["message"],
+      contextFiles: [
+        {
+          path: "AGENTS.md",
+          content: "Stable context rules",
+        },
+      ],
+      extraSystemPrompt: "volatile suffix",
+    });
+    const secondPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["message"],
+      contextFiles: [
+        {
+          path: "AGENTS.md",
+          content: "Stable context rules",
+        },
+      ],
+      extraSystemPrompt: "volatile suffix",
+    });
+
+    const firstStablePrefix = splitSystemPromptCacheBoundary(firstPrompt)?.stablePrefix;
+    const secondStablePrefix = splitSystemPromptCacheBoundary(secondPrompt)?.stablePrefix;
+    const firstSchema = JSON.stringify(createMessageTool().parameters);
+    const secondSchema = JSON.stringify(createMessageTool().parameters);
+
+    expect(firstStablePrefix).toBe(secondStablePrefix);
+    expect(firstSchema).toBe(secondSchema);
   });
 });
 

@@ -124,6 +124,7 @@ describe("context budget guard", () => {
     expect(defaults.maxAssembledTokens).toBe(120_000);
     expect(defaults.reserveTokens).toBe(20_000);
     expect(defaults.perThreadMaxImages).toBe(8);
+    expect(defaults.targetBand).toBeUndefined();
 
     const overridden = resolveContextBudget({
       contextWindowTokens: 200_000,
@@ -151,6 +152,57 @@ describe("context budget guard", () => {
     expect(overridden.reserveTokens).toBe(10_000);
     expect(overridden.perThreadMaxImages).toBe(4);
     expect(overridden.overrideKey).toBe("tenant-b");
+  });
+
+  it("maps targetBand max=32000 to deterministic guard budgets", () => {
+    const resolved = resolveContextBudget({
+      contextWindowTokens: 200_000,
+      cfg: {
+        agents: {
+          defaults: {
+            contextBudget: {
+              targetBand: {
+                min: 16_000,
+                max: 32_000,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(resolved.targetBand).toEqual({ min: 16_000, max: 32_000 });
+    expect(resolved.maxAssembledTokens).toBe(32_000);
+    expect(resolved.reserveTokens).toBe(4_000);
+    expect(resolved.budgetBeforeReserve).toBe(28_000);
+  });
+
+  it("keeps default-off behavior byte-identical when targetBand is absent", () => {
+    const withoutBand = resolveContextBudget({
+      contextWindowTokens: 200_000,
+      cfg: {
+        agents: {
+          defaults: {
+            contextBudget: {
+              enabled: true,
+              maxAssembledTokens: 120_000,
+              reserveTokens: 20_000,
+              perThreadMaxImages: 8,
+            },
+          },
+        },
+      },
+    });
+
+    expect(JSON.stringify(withoutBand)).toBe(
+      JSON.stringify({
+        enabled: true,
+        maxAssembledTokens: 120_000,
+        reserveTokens: 20_000,
+        budgetBeforeReserve: 100_000,
+        perThreadMaxImages: 8,
+      }),
+    );
   });
 
   it("preserves a single oversized current turn instead of dropping to empty", () => {
@@ -210,5 +262,48 @@ describe("context budget guard", () => {
     expect(latestUser?.content).toBe(messages[4]?.content);
     expect(result.messages.at(-1)?.content).toBe("current-ack");
     expect(result.messages).not.toHaveLength(0);
+  });
+
+  it("keeps p99 assembled tokens at or below 32000 with targetBand enabled", () => {
+    const tokenEstimates: number[] = [];
+
+    for (let run = 0; run < 50; run += 1) {
+      const messages: AgentMessage[] = [];
+      for (let i = 0; i < 48; i += 1) {
+        const burst = "X".repeat(1_800 + ((run + i) % 11) * 320);
+        messages.push(makeUserMessage(`turn-${run}-${i} ${burst}`));
+        messages.push(makeAssistantMessage(`ack-${run}-${i} ${burst.slice(0, 240)}`));
+      }
+
+      const result = applyContextBudgetGuard({
+        messages,
+        cfg: {
+          agents: {
+            defaults: {
+              contextBudget: {
+                enabled: true,
+                targetBand: {
+                  min: 16_000,
+                  max: 32_000,
+                },
+              },
+            },
+          },
+        },
+        contextWindowTokens: 200_000,
+        prompt: "follow-up prompt",
+      });
+
+      tokenEstimates.push(result.estimatedTokens);
+      const latestUser = result.messages.filter((message) => message.role === "user").at(-1);
+      expect(latestUser?.content).toBe(
+        messages.filter((message) => message.role === "user").at(-1)?.content,
+      );
+    }
+
+    const sorted = [...tokenEstimates].sort((a, b) => a - b);
+    const p99Index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.99) - 1);
+    const p99 = sorted[p99Index] ?? 0;
+    expect(p99).toBeLessThanOrEqual(32_000);
   });
 });

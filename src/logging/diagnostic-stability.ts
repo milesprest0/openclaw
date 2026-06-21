@@ -310,6 +310,13 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
         event.contextTokenBudget !== undefined ? { limit: event.contextTokenBudget } : undefined;
       record.bytes = event.promptChars;
       break;
+    case "context.gate.applied":
+      record.provider = event.provider;
+      record.model = event.model;
+      record.count = event.droppedTurns;
+      record.bytes = event.estimatedTokens;
+      record.context = { limit: event.maxAssembledTokens, used: event.budgetBeforeReserve };
+      break;
     case "diagnostic.heartbeat":
       record.webhooks = { ...event.webhooks };
       record.active = event.active;

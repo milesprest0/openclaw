@@ -37,6 +37,13 @@ const AgentContextBudgetOverrideSchema = z
     maxAssembledTokens: z.number().int().positive().optional(),
     perThreadMaxImages: z.number().int().nonnegative().optional(),
     reserveTokens: z.number().int().nonnegative().optional(),
+    targetBand: z
+      .object({
+        min: z.number().int().positive().optional(),
+        max: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -234,7 +241,20 @@ export const AgentDefaultsSchema = z
         perThreadMaxImages: z.number().int().nonnegative().optional(),
         reserveTokens: z.number().int().nonnegative().optional(),
         overrideKey: z.string().optional(),
+        targetBand: z
+          .object({
+            min: z.number().int().positive().optional(),
+            max: z.number().int().positive().optional(),
+          })
+          .strict()
+          .optional(),
         overrides: z.record(z.string(), AgentContextBudgetOverrideSchema).optional(),
+      })
+      .strict()
+      .optional(),
+    toolExposure: z
+      .object({
+        lazy: z.boolean().optional(),
       })
       .strict()
       .optional(),

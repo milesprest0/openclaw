@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { setPluginToolMeta } from "../../plugins/tools.js";
 import { providerAliasCases } from "../test-helpers/provider-alias-cases.js";
 import type { AnyAgentTool } from "../tools/common.js";
-import { applyFinalEffectiveToolPolicy } from "./effective-tool-policy.js";
+import {
+  applyFinalEffectiveToolPolicy,
+  applyLazyToolExposurePolicy,
+} from "./effective-tool-policy.js";
 
 function makeTool(name: string, ownerOnly = false): AnyAgentTool {
   return {
@@ -168,5 +171,80 @@ describe("applyFinalEffectiveToolPolicy", () => {
     });
 
     expect(filtered).toEqual([]);
+  });
+
+  it("keeps core tools always available in lazy mode", () => {
+    const filtered = applyLazyToolExposurePolicy({
+      tools: [
+        makeTool("message"),
+        makeTool("exec"),
+        makeTool("read"),
+        makeTool("edit"),
+        makeTool("sessions_spawn"),
+        makeTool("sessions_send"),
+        makeTool("sessions_yield"),
+        makeTool("image_generate"),
+      ],
+      config: {
+        agents: {
+          defaults: {
+            toolExposure: {
+              lazy: true,
+            },
+          },
+        },
+      },
+      userIntentText: "hello there",
+    });
+
+    expect(filtered.map((tool) => tool.name)).toEqual([
+      "message",
+      "exec",
+      "read",
+      "edit",
+      "sessions_spawn",
+      "sessions_send",
+      "sessions_yield",
+    ]);
+  });
+
+  it("surfaces lazy tools when intent text matches", () => {
+    const filtered = applyLazyToolExposurePolicy({
+      tools: [makeTool("message"), makeTool("image_generate"), makeTool("video_generate")],
+      config: {
+        agents: {
+          defaults: {
+            toolExposure: {
+              lazy: true,
+            },
+          },
+        },
+      },
+      userIntentText: "Please generate an image logo for this feature",
+    });
+
+    expect(filtered.map((tool) => tool.name)).toEqual(["message", "image_generate"]);
+  });
+
+  it("keeps lazy exposure default-off byte-identical", () => {
+    const tools = [makeTool("message"), makeTool("image_generate"), makeTool("nodes")];
+    const filtered = applyLazyToolExposurePolicy({
+      tools,
+      config: {
+        agents: {
+          defaults: {
+            toolExposure: {
+              lazy: false,
+            },
+          },
+        },
+      },
+      userIntentText: "generate an image",
+    });
+
+    expect(filtered).toBe(tools);
+    expect(JSON.stringify(filtered.map((tool) => tool.name))).toBe(
+      JSON.stringify(["message", "image_generate", "nodes"]),
+    );
   });
 });
