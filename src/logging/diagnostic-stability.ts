@@ -317,6 +317,20 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
       record.bytes = event.estimatedTokens;
       record.context = { limit: event.maxAssembledTokens, used: event.budgetBeforeReserve };
       break;
+    case "context.projectContext.dieted":
+      record.provider = event.provider;
+      record.model = event.model;
+      record.count = event.regionsPointered;
+      record.bytes = event.afterChars;
+      record.context = { used: event.afterChars, limit: event.beforeChars };
+      break;
+    case "context.history.digested":
+      record.provider = event.provider;
+      record.model = event.model;
+      record.count = event.digestedToolResults;
+      record.bytes = event.afterChars;
+      record.context = { used: event.afterChars, limit: event.beforeChars };
+      break;
     case "diagnostic.heartbeat":
       record.webhooks = { ...event.webhooks };
       record.active = event.active;

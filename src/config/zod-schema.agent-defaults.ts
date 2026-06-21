@@ -265,6 +265,21 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    projectContextOptimization: z
+      .object({
+        dietToRetrieval: z.boolean().optional(),
+        maxChars: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+    historyOptimization: z
+      .object({
+        digestOldToolResults: z.boolean().optional(),
+        keepRawTurns: z.number().int().nonnegative().optional(),
+        oldToolResultMaxChars: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
     embeddedPi: z
       .object({
         projectSettingsPolicy: z

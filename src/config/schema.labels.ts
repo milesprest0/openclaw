@@ -657,6 +657,15 @@ export const FIELD_LABELS: Record<string, string> = {
     "Skills Prompt Optimization Trim Descriptions",
   "agents.defaults.skillsPromptOptimization.maxDescriptionChars":
     "Skills Prompt Optimization Max Description Chars",
+  "agents.defaults.projectContextOptimization": "Project Context Optimization",
+  "agents.defaults.projectContextOptimization.dietToRetrieval": "Project Context Diet To Retrieval",
+  "agents.defaults.projectContextOptimization.maxChars": "Project Context Max Chars",
+  "agents.defaults.historyOptimization": "History Optimization",
+  "agents.defaults.historyOptimization.digestOldToolResults":
+    "History Optimization Digest Old Tool Results",
+  "agents.defaults.historyOptimization.keepRawTurns": "History Optimization Keep Raw Turns",
+  "agents.defaults.historyOptimization.oldToolResultMaxChars":
+    "History Optimization Old Tool Result Max Chars",
   "agents.defaults.embeddedPi": "Embedded Pi",
   "agents.defaults.embeddedPi.projectSettingsPolicy": "Embedded Pi Project Settings Policy",
   "agents.defaults.embeddedPi.executionContract": "Embedded Pi Execution Contract",

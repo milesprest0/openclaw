@@ -1,12 +1,14 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
+import type { AgentProjectContextOptimizationConfig } from "../../config/types.agent-defaults.js";
 import type { MemoryCitationsMode } from "../../config/types.memory.js";
 import type { BootstrapMode } from "../bootstrap-mode.js";
 import type { ResolvedTimeFormat } from "../date-time.js";
 import type { EmbeddedContextFile } from "../pi-embedded-helpers.js";
 import type { ProviderSystemPromptContribution } from "../system-prompt-contribution.js";
 import { buildAgentSystemPrompt } from "../system-prompt.js";
+import type { ProjectContextDietDiagnostic } from "../system-prompt.js";
 import type { PromptMode, SilentReplyPromptMode } from "../system-prompt.types.js";
 import type { EmbeddedSandboxInfo } from "./types.js";
 import type { ReasoningLevel, ThinkLevel } from "./utils.js";
@@ -67,6 +69,8 @@ export function buildEmbeddedSystemPrompt(params: {
   includeMemorySection?: boolean;
   memoryCitationsMode?: MemoryCitationsMode;
   promptContribution?: ProviderSystemPromptContribution;
+  projectContextOptimization?: AgentProjectContextOptimizationConfig;
+  onProjectContextDietDiagnostic?: (diagnostic: ProjectContextDietDiagnostic) => void;
 }): string {
   return buildAgentSystemPrompt({
     workspaceDir: params.workspaceDir,
@@ -104,6 +108,8 @@ export function buildEmbeddedSystemPrompt(params: {
     includeMemorySection: params.includeMemorySection,
     memoryCitationsMode: params.memoryCitationsMode,
     promptContribution: params.promptContribution,
+    projectContextOptimization: params.projectContextOptimization,
+    onProjectContextDietDiagnostic: params.onProjectContextDietDiagnostic,
   });
 }
 

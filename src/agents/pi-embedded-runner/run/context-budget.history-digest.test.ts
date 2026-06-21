@@ -1,0 +1,150 @@
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import { describe, expect, it } from "vitest";
+import { applyContextBudgetGuard } from "./context-budget.js";
+
+function makeUser(content: string): AgentMessage {
+  return { role: "user", content, timestamp: 0 } as AgentMessage;
+}
+
+function makeAssistant(content: string): AgentMessage {
+  return { role: "assistant", content, timestamp: 0 } as AgentMessage;
+}
+
+function makeToolResult(content: string, toolName = "read"): AgentMessage {
+  return {
+    role: "toolResult",
+    toolName,
+    toolCallId: `${toolName}-call`,
+    content: [{ type: "text", text: content }],
+    timestamp: 0,
+  } as AgentMessage;
+}
+
+function toolText(message: AgentMessage): string {
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  const first = content[0] as { text?: string } | undefined;
+  return typeof first?.text === "string" ? first.text : "";
+}
+
+describe("context-budget history digest", () => {
+  it("keeps messages byte-identical when digestOldToolResults is off", () => {
+    const messages: AgentMessage[] = [
+      makeUser("turn-1"),
+      makeAssistant("working"),
+      makeToolResult("raw output /tmp/a.log CASE-100001 https://example.com/r/1"),
+      makeUser("turn-2"),
+      makeAssistant("done"),
+    ];
+
+    const result = applyContextBudgetGuard({
+      messages,
+      cfg: {
+        agents: {
+          defaults: {
+            historyOptimization: {
+              digestOldToolResults: false,
+              keepRawTurns: 1,
+              oldToolResultMaxChars: 120,
+            },
+            contextBudget: {
+              enabled: true,
+              maxAssembledTokens: 500_000,
+              reserveTokens: 1,
+            },
+          },
+        },
+      },
+      contextWindowTokens: 500_000,
+    });
+
+    expect(result.messages).toEqual(messages);
+    expect(result.historyDigestEnabled).toBe(false);
+    expect(result.historyDigested).toBe(false);
+  });
+
+  it("digests older tool results and preserves ids/paths verbatim", () => {
+    const rawOld =
+      "Large tool output for /var/tmp/reports/case-9931.log and CASE-848393 plus https://api.example.com/items/848393 and details " +
+      "x".repeat(4_000);
+    const messages: AgentMessage[] = [
+      makeUser("turn-1"),
+      makeAssistant("running tool"),
+      makeToolResult(rawOld, "read"),
+      makeUser("turn-2"),
+      makeAssistant("new turn"),
+    ];
+
+    const result = applyContextBudgetGuard({
+      messages,
+      cfg: {
+        agents: {
+          defaults: {
+            historyOptimization: {
+              digestOldToolResults: true,
+              keepRawTurns: 1,
+              oldToolResultMaxChars: 320,
+            },
+            contextBudget: {
+              enabled: true,
+              maxAssembledTokens: 500_000,
+              reserveTokens: 1,
+            },
+          },
+        },
+      },
+      contextWindowTokens: 500_000,
+    });
+
+    const digestedText = toolText(result.messages[2] as AgentMessage);
+    expect(digestedText.length).toBeLessThan(rawOld.length);
+    expect(digestedText).toContain("/var/tmp/reports/case-9931.log");
+    expect(digestedText).toContain("CASE-848393");
+    expect(digestedText).toContain("https://api.example.com/items/848393");
+    expect(result.historyDigestEnabled).toBe(true);
+    expect(result.historyDigested).toBe(true);
+    expect(result.digestedToolResults).toBeGreaterThan(0);
+  });
+
+  it("keeps most recent N turns raw", () => {
+    const old = "old tool output " + "x".repeat(2_000);
+    const recentA = "recent A tool output " + "y".repeat(200);
+    const recentB = "recent B tool output " + "z".repeat(200);
+    const messages: AgentMessage[] = [
+      makeUser("turn-1"),
+      makeToolResult(old),
+      makeUser("turn-2"),
+      makeToolResult(recentA),
+      makeUser("turn-3"),
+      makeToolResult(recentB),
+      makeAssistant("latest ack"),
+    ];
+
+    const result = applyContextBudgetGuard({
+      messages,
+      cfg: {
+        agents: {
+          defaults: {
+            historyOptimization: {
+              digestOldToolResults: true,
+              keepRawTurns: 2,
+              oldToolResultMaxChars: 180,
+            },
+            contextBudget: {
+              enabled: true,
+              maxAssembledTokens: 500_000,
+              reserveTokens: 1,
+            },
+          },
+        },
+      },
+      contextWindowTokens: 500_000,
+    });
+
+    expect(toolText(result.messages[1] as AgentMessage)).not.toBe(old);
+    expect(toolText(result.messages[3] as AgentMessage)).toBe(recentA);
+    expect(toolText(result.messages[5] as AgentMessage)).toBe(recentB);
+  });
+});
