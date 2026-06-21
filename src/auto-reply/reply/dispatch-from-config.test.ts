@@ -4138,6 +4138,169 @@ describe("dispatchReplyFromConfig", () => {
       expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
       expect(mocks.routeReply).not.toHaveBeenCalled();
     });
+
+    describe("receipt ack (signal #1) + still-working heartbeat (signal #2)", () => {
+      const ACK_FLAG = "OPENCLAW_SILENT_TURN_RECEIPT_ACK";
+      const HB_FLAG = "OPENCLAW_SILENT_TURN_HEARTBEAT";
+      const ACK_DELAY_FLAG = "OPENCLAW_SILENT_TURN_ACK_DELAY_MS";
+      const HB_INTERVAL_FLAG = "OPENCLAW_SILENT_TURN_HEARTBEAT_INTERVAL_MS";
+      const HB_MAX_FLAG = "OPENCLAW_SILENT_TURN_HEARTBEAT_MAX";
+      const savedSignalFlags: Record<string, string | undefined> = {};
+      const signalFlagNames = [ACK_FLAG, HB_FLAG, ACK_DELAY_FLAG, HB_INTERVAL_FLAG, HB_MAX_FLAG];
+
+      beforeEach(() => {
+        for (const name of signalFlagNames) {
+          savedSignalFlags[name] = process.env[name];
+          delete process.env[name];
+        }
+        vi.useFakeTimers();
+      });
+      afterEach(() => {
+        vi.runOnlyPendingTimers();
+        vi.useRealTimers();
+        for (const name of signalFlagNames) {
+          if (savedSignalFlags[name] === undefined) {
+            delete process.env[name];
+          } else {
+            process.env[name] = savedSignalFlags[name];
+          }
+        }
+      });
+
+      // Helper: a reply resolver that resolves the real final only after `holdMs` of fake time.
+      const deferredReply = (text: string, holdMs: number) => async () => {
+        await vi.advanceTimersByTimeAsync(holdMs);
+        return { text } satisfies ReplyPayload;
+      };
+
+      it("fast turn: ack suppressed, exactly one terminal final", async () => {
+        setNoAbort();
+        const dispatcher = createDispatcher();
+        const ctx = buildTestCtx({ Provider: "whatsapp", Body: "quick question" });
+        // Real answer lands at 100ms, well inside the 4000ms ack window.
+        const replyResolver = deferredReply("the fast answer", 100);
+        await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+        await vi.advanceTimersByTimeAsync(10_000); // flush any (cancelled) timers
+        const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+        expect(finalCalls).toHaveLength(1);
+        expect(finalCalls[0][0]).toMatchObject({ text: "the fast answer" });
+      });
+
+      it("slow turn: ack fires once, then terminal final, no duplicates", async () => {
+        setNoAbort();
+        const dispatcher = createDispatcher();
+        const ctx = buildTestCtx({ Provider: "whatsapp", Body: "please research X" });
+        // Real answer lands at 6000ms, AFTER the 4000ms ack window → ack should fire once.
+        const replyResolver = deferredReply("the slow answer", 6_000);
+        await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const finalTexts = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls.map(
+          (c) => String(c[0].text),
+        );
+        const ackCount = finalTexts.filter((t) => t.includes("working on your request")).length;
+        const answerCount = finalTexts.filter((t) => t === "the slow answer").length;
+        expect(ackCount).toBe(1);
+        expect(answerCount).toBe(1);
+        // Ack references the inbound request (substantive, not empty filler).
+        expect(finalTexts.some((t) => t.includes("please research X"))).toBe(true);
+      });
+
+      it("very long turn: heartbeats fire bounded, then stop on terminal final", async () => {
+        process.env[HB_INTERVAL_FLAG] = "1000";
+        process.env[HB_MAX_FLAG] = "3";
+        process.env[ACK_FLAG] = "0"; // isolate heartbeat behavior
+        setNoAbort();
+        const dispatcher = createDispatcher();
+        const ctx = buildTestCtx({ Provider: "whatsapp", Body: "long task" });
+        // Real answer lands at 10s; with 1s interval + cap 3, exactly 3 heartbeats should fire.
+        const replyResolver = deferredReply("the eventual answer", 10_000);
+        await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const finalTexts = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls.map(
+          (c) => String(c[0].text),
+        );
+        const hbCount = finalTexts.filter((t) => t.includes("Still working")).length;
+        const answerCount = finalTexts.filter((t) => t === "the eventual answer").length;
+        expect(hbCount).toBe(3); // bounded by cap
+        expect(answerCount).toBe(1);
+      });
+
+      it("flags off: no ack, no heartbeat (prior behavior preserved)", async () => {
+        process.env[ACK_FLAG] = "0";
+        process.env[HB_FLAG] = "off";
+        process.env[HB_INTERVAL_FLAG] = "1000";
+        setNoAbort();
+        const dispatcher = createDispatcher();
+        const ctx = buildTestCtx({ Provider: "whatsapp", Body: "hello" });
+        const replyResolver = deferredReply("the answer", 6_000);
+        await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const finalTexts = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls.map(
+          (c) => String(c[0].text),
+        );
+        // Only the real answer — no interim signals at all.
+        expect(finalTexts).toEqual(["the answer"]);
+      });
+
+      it("master switch off: no ack, no heartbeat even with sub-flags on", async () => {
+        process.env[SILENT_TURN_FLAG] = "0";
+        process.env[HB_INTERVAL_FLAG] = "1000";
+        setNoAbort();
+        const dispatcher = createDispatcher();
+        const ctx = buildTestCtx({ Provider: "whatsapp", Body: "hello" });
+        const replyResolver = deferredReply("the answer", 6_000);
+        await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const finalTexts = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls.map(
+          (c) => String(c[0].text),
+        );
+        expect(finalTexts).toEqual(["the answer"]);
+      });
+
+      it("idempotency: terminal final cancels pending ack and stops heartbeats", async () => {
+        process.env[HB_INTERVAL_FLAG] = "1000";
+        process.env[HB_MAX_FLAG] = "20";
+        setNoAbort();
+        const dispatcher = createDispatcher();
+        const ctx = buildTestCtx({ Provider: "whatsapp", Body: "task" });
+        // Answer at 2500ms: before the 4000ms ack window AND after 2 heartbeats (1s,2s).
+        const replyResolver = deferredReply("done", 2_500);
+        await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+        // Advance well past where more heartbeats / the ack WOULD have fired.
+        await vi.advanceTimersByTimeAsync(30_000);
+        const finalTexts = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls.map(
+          (c) => String(c[0].text),
+        );
+        const ackCount = finalTexts.filter((t) => t.includes("working on your request")).length;
+        const hbCount = finalTexts.filter((t) => t.includes("Still working")).length;
+        const answerCount = finalTexts.filter((t) => t === "done").length;
+        expect(ackCount).toBe(0); // ack cancelled by early terminal delivery
+        expect(answerCount).toBe(1);
+        // Heartbeats stopped at terminal delivery: at most the 2 that fired before 2500ms,
+        // and crucially they did NOT keep firing for the full 30s window.
+        expect(hbCount).toBeLessThanOrEqual(2);
+      });
+
+      it("suppressed turn: no ack, no heartbeat (not owed a reply)", async () => {
+        process.env[HB_INTERVAL_FLAG] = "1000";
+        setNoAbort();
+        // sendPolicy deny suppresses outbound delivery; the turn is not owed a reply, so the
+        // ack/heartbeat signals must stay armed-off (same exclusion as the terminal guard).
+        sessionStoreMocks.currentEntry = {
+          sessionId: "s1",
+          updatedAt: 0,
+          sendPolicy: "deny",
+        };
+        const dispatcher = createDispatcher();
+        const ctx = buildTestCtx({ SessionKey: "test:session", Body: "hello" });
+        const replyResolver = deferredReply("the answer", 6_000);
+        await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+        await vi.advanceTimersByTimeAsync(10_000);
+        // Delivery fully suppressed: NO sends of any kind (ack, heartbeat, or final).
+        expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+        expect(mocks.routeReply).not.toHaveBeenCalled();
+      });
+    });
   });
 
   it("strips split TTS directives from streamed block text before delivery", async () => {

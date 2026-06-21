@@ -436,40 +436,102 @@ export async function dispatchReplyFromConfig(
   };
 
   // --- Silent-turn delivery guarantee (feature-flagged, additive, idempotent) ---
-  // Deterministic, code-side guarantee that an owed turn never ends without exactly one
+  // Deterministic, code-side guarantee that an owed turn (a) is acknowledged when it starts,
+  // (b) keeps signalling life while it runs long, and (c) never ends without exactly one
   // user-visible final. Closes: reasoning-only completion, unhandled dispatch exception,
-  // final-delivery transport failure, and graceful restart aborts. See RCA.md.
-  // Default ON; set OPENCLAW_SILENT_TURN_GUARANTEE=0|false|off to disable.
+  // final-delivery transport failure, graceful restart aborts (terminal guarantee), plus the
+  // two "always get back to the user" signals — receipt ack + still-working heartbeat. All
+  // three signals share ONE turn-scoped state + ONE low-level send path. See RCA.md / PLAN.md.
+  // Master switch default ON; set OPENCLAW_SILENT_TURN_GUARANTEE=0|false|off to disable all.
   const silentTurnGuaranteeEnabled = (() => {
     const raw = (process.env.OPENCLAW_SILENT_TURN_GUARANTEE ?? "").trim().toLowerCase();
     return raw !== "0" && raw !== "false" && raw !== "off";
   })();
-  // Flipped true by EVERY successful user-visible final delivery (existing paths set it via
-  // the guarded sendFinalPayload wrapper / loop accounting). The guard checks it before
-  // sending so it can never double-post when a real answer already went out.
+  const silentTurnFlagEnabled = (name: string): boolean => {
+    const raw = (process.env[name] ?? "").trim().toLowerCase();
+    return raw !== "0" && raw !== "false" && raw !== "off";
+  };
+  const silentTurnPositiveInt = (name: string, fallback: number): number => {
+    const raw = (process.env[name] ?? "").trim();
+    if (!raw) {
+      return fallback;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  // Granular sub-switches (all gated under the master switch). Defaults ON.
+  const receiptAckEnabled =
+    silentTurnGuaranteeEnabled && silentTurnFlagEnabled("OPENCLAW_SILENT_TURN_RECEIPT_ACK");
+  const heartbeatEnabled =
+    silentTurnGuaranteeEnabled && silentTurnFlagEnabled("OPENCLAW_SILENT_TURN_HEARTBEAT");
+  // Receipt-ack suppression window: if the real final lands within this window the ack is
+  // cancelled, so fast turns never see a redundant ack. Default 4000ms.
+  const receiptAckDelayMs = silentTurnPositiveInt("OPENCLAW_SILENT_TURN_ACK_DELAY_MS", 4000);
+  // Heartbeat cadence: first beat at the interval, then every interval, bounded by a cap.
+  const heartbeatIntervalMs = silentTurnPositiveInt(
+    "OPENCLAW_SILENT_TURN_HEARTBEAT_INTERVAL_MS",
+    30_000,
+  );
+  const heartbeatMax = silentTurnPositiveInt("OPENCLAW_SILENT_TURN_HEARTBEAT_MAX", 10);
+
+  // ---- Shared turn-scoped coordination state for all three signals ----
+  // Flipped true by EVERY successful user-visible TERMINAL final delivery. The guard checks
+  // it before sending a final so it can never double-post when a real answer already went
+  // out, AND the ack/heartbeat signals check it so they never fire after the answer landed.
   let userVisibleFinalDelivered = false;
-  // Text-only guaranteed delivery primitive shared by the success-tail and catch backstops.
+  let receiptAckSent = false; // idempotency: at most one receipt ack per turn
+  let heartbeatCount = 0; // bounded still-working beats
+  let receiptAckTimer: ReturnType<typeof setTimeout> | undefined;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
+  const cancelReceiptAckTimer = () => {
+    if (receiptAckTimer !== undefined) {
+      clearTimeout(receiptAckTimer);
+      receiptAckTimer = undefined;
+    }
+  };
+  const stopHeartbeat = () => {
+    if (heartbeatTimer !== undefined) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
+    }
+  };
+  // Terminal delivery (or any turn exit) cancels a pending ack timer AND stops heartbeats.
+  // Idempotent and cheap; also called from the finally so timers can never leak.
+  const cancelSilentTurnSignals = () => {
+    cancelReceiptAckTimer();
+    stopHeartbeat();
+  };
+
+  // ---- ONE low-level send path (single source of truth) ----
   // Mirrors sendFinalPayload's route-or-dispatcher fallback but stays dependency-free so it
-  // is safe to call from the catch block. Idempotent: no-op once a final already went out.
+  // is safe to call from timers and the catch block. Used by BOTH the terminal guarantee and
+  // the interim ack/heartbeat signals. It performs NO terminal-final bookkeeping — callers
+  // that are terminal flip `userVisibleFinalDelivered`; interim signals deliberately do not.
+  const deliverSilentTurnText = async (text: string): Promise<boolean> => {
+    const payload: ReplyPayload = { text };
+    const routed = await routeReplyToOriginating(payload);
+    if (routed) {
+      return routed.ok;
+    }
+    markInboundDedupeReplayUnsafe();
+    return dispatcher.sendFinalReply(payload);
+  };
+
+  // Terminal-final delivery primitive shared by the success-tail and catch backstops.
+  // Idempotent: no-op once a final already went out. On success flips the shared flag and
+  // cancels any in-flight ack/heartbeat so the three signals stay mutually coordinated.
   const deliverGuaranteedFinalText = async (text: string): Promise<boolean> => {
     if (!silentTurnGuaranteeEnabled || userVisibleFinalDelivered) {
       return false;
     }
     try {
-      const payload: ReplyPayload = { text };
-      const routed = await routeReplyToOriginating(payload);
-      if (routed) {
-        if (routed.ok) {
-          userVisibleFinalDelivered = true;
-        }
-        return routed.ok;
-      }
-      markInboundDedupeReplayUnsafe();
-      const queued = dispatcher.sendFinalReply(payload);
-      if (queued) {
+      const ok = await deliverSilentTurnText(text);
+      if (ok) {
         userVisibleFinalDelivered = true;
+        cancelSilentTurnSignals();
       }
-      return queued;
+      return ok;
     } catch (guaranteeErr) {
       logVerbose(
         `dispatch-from-config: silent-turn guarantee delivery failed (non-fatal): ${formatErrorMessage(
@@ -477,6 +539,92 @@ export async function dispatchReplyFromConfig(
         )}`,
       );
       return false;
+    }
+  };
+
+  // ---- SIGNAL #1: receipt ack (substantive, non-filler, tied to the inbound request) ----
+  const buildReceiptAckText = (): string => {
+    const raw = (
+      (typeof ctx.BodyForCommands === "string" && ctx.BodyForCommands) ||
+      (typeof ctx.CommandBody === "string" && ctx.CommandBody) ||
+      (typeof ctx.RawBody === "string" && ctx.RawBody) ||
+      (typeof ctx.Body === "string" && ctx.Body) ||
+      ""
+    ).trim();
+    const firstLine = (raw.split(/\r?\n/, 1)[0] ?? "").trim();
+    const snippet = firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+    return snippet
+      ? `Got it \u2014 I'm working on your request: \u201c${snippet}\u201d. I'll follow up shortly.`
+      : "Got it \u2014 I'm working on your request now and will follow up shortly.";
+  };
+  // Fired by the ack timer. Idempotent and only fires while the turn is still genuinely owed
+  // (master+granular flag on, not suppressed, no terminal final yet, not already acked).
+  const fireReceiptAck = async () => {
+    if (!receiptAckEnabled || suppressDelivery || userVisibleFinalDelivered || receiptAckSent) {
+      return;
+    }
+    receiptAckSent = true; // mark before awaiting so it can never double-send
+    try {
+      await deliverSilentTurnText(buildReceiptAckText());
+      logVerbose(
+        `dispatch-from-config: silent-turn receipt ack delivered (session=${
+          sessionKey ?? "unknown"
+        })`,
+      );
+    } catch (ackErr) {
+      logVerbose(
+        `dispatch-from-config: silent-turn receipt ack failed (non-fatal): ${formatErrorMessage(
+          ackErr,
+        )}`,
+      );
+    }
+  };
+
+  // ---- SIGNAL #2: still-working heartbeat (lightweight, bounded) ----
+  const fireHeartbeat = async () => {
+    if (!heartbeatEnabled || suppressDelivery || userVisibleFinalDelivered) {
+      return;
+    }
+    try {
+      await deliverSilentTurnText(
+        "\u23f3 Still working on this \u2014 thanks for your patience; I'll follow up as soon as I have it.",
+      );
+    } catch (hbErr) {
+      logVerbose(
+        `dispatch-from-config: silent-turn heartbeat failed (non-fatal): ${formatErrorMessage(
+          hbErr,
+        )}`,
+      );
+    }
+  };
+
+  // Arms both signals at turn start. No-op when the master/granular flags are off or the turn
+  // is not owed a user-visible reply (suppressed). Timers are always cleared by the finally.
+  // NOTE (REL-024a): the external orphan-reconciler watchdog's TEXT auto-ack stays DISABLED
+  // (ACK_DELAY_MS=0; it only does an :eyes: reaction + activity logging). THIS in-process
+  // receipt ack is the single substantive text ack, so there is no conflicting double ack.
+  const armSilentTurnSignals = () => {
+    if (!silentTurnGuaranteeEnabled || suppressDelivery) {
+      return;
+    }
+    if (receiptAckEnabled) {
+      receiptAckTimer = setTimeout(() => {
+        receiptAckTimer = undefined;
+        void fireReceiptAck();
+      }, receiptAckDelayMs);
+    }
+    if (heartbeatEnabled) {
+      heartbeatTimer = setInterval(() => {
+        if (userVisibleFinalDelivered || suppressDelivery || heartbeatCount >= heartbeatMax) {
+          stopHeartbeat();
+          return;
+        }
+        heartbeatCount += 1;
+        void fireHeartbeat();
+        if (heartbeatCount >= heartbeatMax) {
+          stopHeartbeat();
+        }
+      }, heartbeatIntervalMs);
     }
   };
 
@@ -978,6 +1126,13 @@ export async function dispatchReplyFromConfig(
   }
 
   markProcessing();
+
+  // Arm the silent-turn interim signals (receipt ack timer + still-working heartbeat) now
+  // that the turn is genuinely processing and `suppressDelivery` is resolved. The terminal
+  // delivery guarantee, the ack, and the heartbeat all coordinate through the shared
+  // turn-scoped state above; the `finally` below tears every timer down on ALL exit paths
+  // (success, early return, error) so nothing leaks. No-op when flags are off or suppressed.
+  armSilentTurnSignals();
 
   try {
     const abortRuntime = params.fastAbortResolver ? null : await loadAbortRuntime();
@@ -1791,5 +1946,9 @@ export async function dispatchReplyFromConfig(
       }
     }
     throw err;
+  } finally {
+    // Tear down the receipt-ack timer + heartbeat interval on EVERY exit path (success tail,
+    // any early return inside the try, or the rethrow above) so timers can never leak.
+    cancelSilentTurnSignals();
   }
 }
