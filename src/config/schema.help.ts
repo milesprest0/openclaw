@@ -1410,6 +1410,12 @@ export const FIELD_HELP: Record<string, string> = {
     "Prompt-time tool exposure policy. Use this to keep low-frequency tools out of the default advertised tool list until the user prompt indicates intent.",
   "agents.defaults.toolExposure.lazy":
     "Enable intent-driven lazy exposure for low-frequency tools (default: false). Core tools remain always available.",
+  "agents.defaults.skillsPromptOptimization":
+    "Prompt-time skills description optimization controls. Keep disabled by default to preserve the upstream-aligned available-skills prompt output until you explicitly opt in.",
+  "agents.defaults.skillsPromptOptimization.trimDescriptions":
+    "Trim available-skills description text to a deterministic selection-signal prefix (default: false). Disable to keep full descriptions byte-identical to upstream formatting.",
+  "agents.defaults.skillsPromptOptimization.maxDescriptionChars":
+    "Maximum characters to keep per available-skills description when trimDescriptions is enabled (default: 160). Trimming happens at a word boundary and appends an ellipsis.",
   "agents.defaults.embeddedPi":
     "Embedded Pi runner hardening controls for how workspace-local Pi settings are trusted and applied in OpenClaw sessions.",
   "agents.defaults.embeddedPi.projectSettingsPolicy":

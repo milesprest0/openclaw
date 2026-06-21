@@ -20,7 +20,11 @@ import { resolveOpenClawMetadata, resolveSkillInvocationPolicy } from "./frontma
 import { loadSkillsFromDirSafe, readSkillFrontmatterSafe } from "./local-loader.js";
 import { resolvePluginSkillDirs } from "./plugin-skills.js";
 import { serializeByKey } from "./serialize.js";
-import { formatSkillsForPrompt, type Skill } from "./skill-contract.js";
+import {
+  formatSkillsForPrompt,
+  type FormatSkillsForPromptOptions,
+  type Skill,
+} from "./skill-contract.js";
 import type {
   ParsedSkillFrontmatter,
   SkillEligibilityContext,
@@ -129,6 +133,12 @@ const DEFAULT_MAX_SKILLS_PROMPT_CHARS = 18_000;
 const DEFAULT_MAX_SKILL_FILE_BYTES = 256_000;
 const DEFAULT_MIN_RAW_ENTRIES_PER_DIRECTORY_SCAN = 1_000;
 const DEFAULT_MAX_RAW_ENTRIES_PER_DIRECTORY_SCAN = 10_000;
+const DEFAULT_SKILLS_PROMPT_OPTIMIZATION_MAX_DESCRIPTION_CHARS = 160;
+
+type ResolvedSkillsPromptOptimization = {
+  trimDescriptions: boolean;
+  maxDescriptionChars: number;
+};
 
 type ResolvedSkillsLimits = {
   maxCandidatesPerRoot: number;
@@ -168,6 +178,17 @@ function resolveSkillsLimits(config?: OpenClawConfig, agentId?: string): Resolve
       limits?.maxSkillsPromptChars ??
       DEFAULT_MAX_SKILLS_PROMPT_CHARS,
     maxSkillFileBytes: limits?.maxSkillFileBytes ?? DEFAULT_MAX_SKILL_FILE_BYTES,
+  };
+}
+
+function resolveSkillsPromptOptimization(
+  config?: OpenClawConfig,
+): ResolvedSkillsPromptOptimization {
+  const optimization = config?.agents?.defaults?.skillsPromptOptimization;
+  return {
+    trimDescriptions: optimization?.trimDescriptions === true,
+    maxDescriptionChars:
+      optimization?.maxDescriptionChars ?? DEFAULT_SKILLS_PROMPT_OPTIMIZATION_MAX_DESCRIPTION_CHARS,
   };
 }
 
@@ -857,6 +878,7 @@ function applySkillsPromptLimits(params: {
   skills: Skill[];
   config?: OpenClawConfig;
   agentId?: string;
+  formatOpts?: FormatSkillsForPromptOptions;
 }): {
   skillsForPrompt: Skill[];
   truncated: boolean;
@@ -871,7 +893,7 @@ function applySkillsPromptLimits(params: {
   let compact = false;
 
   const fitsFull = (skills: Skill[]): boolean =>
-    formatSkillsForPrompt(skills).length <= limits.maxSkillsPromptChars;
+    formatSkillsForPrompt(skills, params.formatOpts).length <= limits.maxSkillsPromptChars;
 
   // Reserve space for the warning line the caller prepends in compact mode.
   const compactBudget = limits.maxSkillsPromptChars - COMPACT_WARNING_OVERHEAD;
@@ -980,10 +1002,18 @@ function resolveWorkspaceSkillPromptState(
   const promptSkills = compactSkillPaths(resolvedSkills)
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name, "en"));
+  const skillsPromptOptimization = resolveSkillsPromptOptimization(opts?.config);
+  const formatOpts: FormatSkillsForPromptOptions | undefined =
+    skillsPromptOptimization.trimDescriptions
+      ? {
+          maxDescriptionChars: skillsPromptOptimization.maxDescriptionChars,
+        }
+      : undefined;
   const { skillsForPrompt, truncated, compact } = applySkillsPromptLimits({
     skills: promptSkills,
     config: opts?.config,
     agentId: opts?.agentId,
+    formatOpts,
   });
   const truncationNote = truncated
     ? `⚠️ Skills truncated: included ${skillsForPrompt.length} of ${resolvedSkills.length}${compact ? " (compact format, descriptions omitted)" : ""}. Run \`openclaw skills check\` to audit.`
@@ -993,7 +1023,9 @@ function resolveWorkspaceSkillPromptState(
   const prompt = [
     remoteNote,
     truncationNote,
-    compact ? formatSkillsCompact(skillsForPrompt) : formatSkillsForPrompt(skillsForPrompt),
+    compact
+      ? formatSkillsCompact(skillsForPrompt)
+      : formatSkillsForPrompt(skillsForPrompt, formatOpts),
   ]
     .filter(Boolean)
     .join("\n");

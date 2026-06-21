@@ -8,6 +8,13 @@ export type Skill = CanonicalSkill & {
   source?: string;
 };
 
+const DEFAULT_MAX_SKILL_DESCRIPTION_CHARS = 160;
+const TRAILING_DESCRIPTION_BOUNDARY_RE = /[\s.,;:!?"'`~\-_/\\()\[\]{}<>]+$/u;
+
+export type FormatSkillsForPromptOptions = {
+  maxDescriptionChars?: number;
+};
+
 export function createSyntheticSourceInfo(
   path: string,
   options: {
@@ -35,16 +42,52 @@ function escapeXml(str: string): string {
     .replace(/'/g, "&apos;");
 }
 
+export function trimSkillDescription(desc: string, maxChars: number): string {
+  if (desc.length <= maxChars) {
+    return desc;
+  }
+  if (maxChars <= 0) {
+    return "…";
+  }
+
+  const clipped = desc.slice(0, maxChars);
+  let boundary = -1;
+  for (let index = clipped.length - 1; index >= 0; index -= 1) {
+    const ch = clipped.charCodeAt(index);
+    if (ch === 32 || ch === 9 || ch === 10 || ch === 11 || ch === 12 || ch === 13) {
+      boundary = index;
+      break;
+    }
+  }
+
+  let trimmed = (boundary > 0 ? clipped.slice(0, boundary) : clipped).replace(
+    TRAILING_DESCRIPTION_BOUNDARY_RE,
+    "",
+  );
+  if (!trimmed) {
+    trimmed = clipped.trimEnd();
+  }
+  if (!trimmed) {
+    return "…";
+  }
+  return `${trimmed}…`;
+}
+
 /**
  * Keep this formatter's XML layout byte-for-byte aligned with the upstream
  * Agent Skills formatter so we can avoid importing the full pi-coding-agent
  * package root on the cold skills path. Visibility policy is applied upstream
  * before calling this helper.
  */
-export function formatSkillsForPrompt(skills: Skill[]): string {
+export function formatSkillsForPrompt(
+  skills: Skill[],
+  opts?: FormatSkillsForPromptOptions,
+): string {
   if (skills.length === 0) {
     return "";
   }
+  const shouldTrimDescriptions = opts !== undefined;
+  const maxDescriptionChars = opts?.maxDescriptionChars ?? DEFAULT_MAX_SKILL_DESCRIPTION_CHARS;
   const lines = [
     "\n\nThe following skills provide specialized instructions for specific tasks.",
     "Use the read tool to load a skill's file when the task matches its description.",
@@ -53,9 +96,12 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
     "<available_skills>",
   ];
   for (const skill of skills) {
+    const description = shouldTrimDescriptions
+      ? trimSkillDescription(skill.description, maxDescriptionChars)
+      : skill.description;
     lines.push("  <skill>");
     lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-    lines.push(`    <description>${escapeXml(skill.description)}</description>`);
+    lines.push(`    <description>${escapeXml(description)}</description>`);
     lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
     lines.push("  </skill>");
   }

@@ -305,6 +305,8 @@ export type AgentDefaultsConfig = {
   contextBudget?: AgentContextBudgetConfig;
   /** Tool exposure defaults for prompt-time tool lists. */
   toolExposure?: AgentToolExposureConfig;
+  /** Prompt-time skill description optimization controls. */
+  skillsPromptOptimization?: AgentSkillsPromptOptimizationConfig;
   /** Embedded Pi runner hardening and compatibility controls. */
   embeddedPi?: {
     /**
@@ -509,6 +511,13 @@ export type AgentContextBudgetTargetBandConfig = {
 export type AgentToolExposureConfig = {
   /** Enable intent-driven lazy exposure for low-frequency tools (default: false). */
   lazy?: boolean;
+};
+
+export type AgentSkillsPromptOptimizationConfig = {
+  /** Trim skill descriptions in the available-skills prompt block (default: false). */
+  trimDescriptions?: boolean;
+  /** Maximum characters per skill description when trimming is enabled (default: 160). */
+  maxDescriptionChars?: number;
 };
 
 export type AgentCompactionMode = "default" | "safeguard";

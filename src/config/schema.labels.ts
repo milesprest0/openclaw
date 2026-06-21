@@ -652,6 +652,11 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.contextBudget.targetBand.max": "Context Budget Target Max Tokens",
   "agents.defaults.toolExposure": "Tool Exposure",
   "agents.defaults.toolExposure.lazy": "Tool Exposure Lazy Mode",
+  "agents.defaults.skillsPromptOptimization": "Skills Prompt Optimization",
+  "agents.defaults.skillsPromptOptimization.trimDescriptions":
+    "Skills Prompt Optimization Trim Descriptions",
+  "agents.defaults.skillsPromptOptimization.maxDescriptionChars":
+    "Skills Prompt Optimization Max Description Chars",
   "agents.defaults.embeddedPi": "Embedded Pi",
   "agents.defaults.embeddedPi.projectSettingsPolicy": "Embedded Pi Project Settings Policy",
   "agents.defaults.embeddedPi.executionContract": "Embedded Pi Execution Contract",
