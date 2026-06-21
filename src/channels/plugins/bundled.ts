@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { isPathInside, safeRealpathSync } from "../../infra/path-guards.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type {
   BundledChannelLegacySessionSurface,
@@ -154,6 +155,29 @@ function hasChannelEntryFeature(
   return entry?.features?.[feature] === true;
 }
 
+/**
+ * Decide whether `modulePath` lives under `root`, tolerating symlinked launch
+ * paths (e.g. the gateway started via `/usr/lib/node_modules/openclaw` ->
+ * the real checkout). The candidate roots are derived from `process.argv[1]`
+ * (symlink form) while the resolved module path is canonical, so a purely
+ * lexical `startsWith` comparison spuriously fails and the wrong (source) root
+ * gets selected. Compare on canonical (realpath) form when available, falling
+ * back to lexical containment when realpath is unavailable (e.g. paths that do
+ * not exist on disk in unit tests). This only affects WHICH legitimate plugin
+ * root is chosen; the actual containment security control in
+ * `openRootFileSync` is untouched.
+ */
+export function moduleResolvesUnderBoundaryRoot(root: string, modulePath: string): boolean {
+  const resolvedRoot = path.resolve(root);
+  const resolvedModule = path.resolve(modulePath);
+  if (resolvedModule === resolvedRoot || resolvedModule.startsWith(`${resolvedRoot}${path.sep}`)) {
+    return true;
+  }
+  const realRoot = safeRealpathSync(resolvedRoot) ?? resolvedRoot;
+  const realModule = safeRealpathSync(resolvedModule) ?? resolvedModule;
+  return realModule === realRoot || isPathInside(realRoot, realModule);
+}
+
 function resolveBundledChannelBoundaryRoot(params: {
   packageRoot: string;
   pluginsDir?: string;
@@ -163,15 +187,11 @@ function resolveBundledChannelBoundaryRoot(params: {
   const overrideRoot = params.pluginsDir
     ? path.resolve(params.pluginsDir, params.metadata.dirName)
     : null;
-  if (
-    overrideRoot &&
-    (params.modulePath === overrideRoot ||
-      params.modulePath.startsWith(`${overrideRoot}${path.sep}`))
-  ) {
+  if (overrideRoot && moduleResolvesUnderBoundaryRoot(overrideRoot, params.modulePath)) {
     return overrideRoot;
   }
   const distRoot = path.resolve(params.packageRoot, "dist", "extensions", params.metadata.dirName);
-  if (params.modulePath === distRoot || params.modulePath.startsWith(`${distRoot}${path.sep}`)) {
+  if (moduleResolvesUnderBoundaryRoot(distRoot, params.modulePath)) {
     return distRoot;
   }
   return path.resolve(params.packageRoot, "extensions", params.metadata.dirName);
