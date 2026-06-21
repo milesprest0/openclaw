@@ -1,51 +1,112 @@
-# PLAN — Slack Thread Auto-Bind Guard (6-phase SDLC)
+# PLAN — Silent-Turn Delivery Guarantee (miles/silent-turn-guarantee)
 
-Branch: `miles/thread-bind-guard`
-Worktree: `/home/miles/projects/openclaw-fork-worktrees/thread-bind-guard`
-Base: `main`
+Full SDLC plan. This touches the production turn-handling path, so all 6 phases apply.
 
-## 1) Discovery
+## Phase 1 — Problem & Scope
 
-- Trace inbound thread provenance fields already available on turn context (`topic_id`, `reply_to_id`, `thread_ts`) via `TemplateContext` and `FinalizedMsgContext` plumbing.
-- Trace outbound message send routing for `action="send"` through shared dispatch/runtime layers (`src/auto-reply/reply/dispatch-from-config.ts`, message tool path, and outbound route helper layers).
-- Locate the final thread target selection seam where defaulting can be applied once and inherited fleet-wide.
+**Problem (Miles):** Sometimes a query "goes off" — internal Prest0n or account-specific
+Prest0n on Slack — and the user never hears back, for a long time or ever.
 
-## 2) Design
+**Definitive root causes (see RCA.md for file:line evidence):**
 
-- Introduce a turn-scoped `turnThreadContext` derived at ingress, carrying canonical inbound thread provenance in precedence order.
-- Add shared resolver logic for outbound Slack send thread resolution with deterministic precedence:
-  1. Explicit `threadId` arg.
-  2. Inbound `topic_id`.
-  3. Inbound `reply_to_id` / `thread_ts`.
-  4. None (top-level).
-- Add explicit `topLevel: true` escape hatch to force top-level delivery even when inbound thread provenance exists.
+1. **Reasoning-only completion** — the model emits only `isReasoning` payloads; the generic
+   channel dispatch loop skips every one (`reply.isReasoning === true → continue`,
+   dispatch-from-config.ts:1564), so the turn ends with **zero** user-visible delivery on a
+   surface that was owed a reply. PR #23 fixed this on branch `feat/empty-completion-guard`
+   but **that branch was never merged to main** — the guard is absent from the live bundle.
 
-## 3) Implementation
+2. **Unhandled exception in dispatch** — the top-level `catch` at dispatch-from-config.ts:1660
+   does `recordProcessed("error") → markIdle → throw`. It re-throws WITHOUT delivering any
+   user-visible message. Upstream channel callers log/swallow it; the user gets nothing.
 
-- Implement resolver and wire it into shared dispatcher-layer send path (Slack-gated behavior, not account-specific).
-- Thread `turnThreadContext` from ingress into the send path that handles `action="send"`.
-- Add feature flag gate so auto-bind can be disabled at runtime without redeploy.
-- Emit structured, high-signal log line whenever auto-bind attaches a thread by guard default.
+3. **Final-delivery failure** — `routeReplyToOriginating`/`dispatcher.sendFinalReply` returns
+   not-ok (`finalDeliveryFailed = true`) and nothing else is attempted; the user is owed a
+   reply and silently gets none.
 
-## 4) Verification
+4. **Drain-kill on restart (process death)** — systemd `TimeoutStopSec=30` but the gateway's
+   internal restart drain budget is `DEFAULT_RESTART_DRAIN_TIMEOUT_MS = 300_000` (300s).
+   On restart the gateway logs `draining N active task(s) ... with timeout 300000ms` and
+   waits up to 5 min, but systemd SIGKILLs the process group at **30s**
+   (`KillMode=control-group`). The in-flight turn dies mid-model-call with no delivery.
+   Confirmed twice in journal: 16:06:28→16:06:59 and 23:02:30→23:03:00.
 
-- Add/adjust regression tests for required cases:
-  - Threaded inbound -> default binds.
-  - Cron/proactive (no threaded inbound trigger) -> remains top-level.
-  - Explicit cross-post `threadId` -> honored.
-  - Explicit `topLevel: true` -> honored.
-- Run required gates:
-  - Build/typecheck lane required by task.
-  - Dispatch-from-config test suite.
+**Scope of THIS change (code-side, in-process, low-risk, non-redundant):** close modes
+**1, 2, 3** and the _graceful_ portion of **4** with ONE deterministic finally-guarantee
+inside `dispatchReplyFromConfig`. Mode 4's hard SIGKILL (process already dead) cannot be
+closed by in-process code — that is a config fix (`TimeoutStopSec`) + the existing REL-024a
+orphan reconciler's job; documented in RCA, not implemented here.
 
-## 5) Hardening
+## Phase 2 — Design
 
-- Validate no behavior change for non-Slack providers and non-thread-triggered turns.
-- Ensure no request-time rediscovery regressions; reuse prepared runtime context.
-- Keep defaults deterministic and test-covered for future refactors.
+Single additive, idempotent, feature-flagged **terminal-outcome finally guarantee** in
+`dispatchReplyFromConfig`:
 
-## 6) Handoff
+- New function-scoped tracker `userVisibleFinalDelivered` (set true on every successful
+  final delivery, including existing paths).
+- New function-scoped primitive `deliverGuaranteedFinalText(text)` — mirrors the
+  route-or-dispatcher fallback already used by `sendFinalPayload`, text-only, accessible
+  from BOTH the success tail and the `catch` block.
+- **Reasoning-only promotion** (folds in PR #23's proven behavior): after the reply loop,
+  when `!suppressDelivery && !attemptedFinalDelivery && replies.length > 0`, promote the
+  last reasoning payload carrying visible text to a real final.
+- **Final-delivery-failure backstop** (success tail): if the turn actually attempted a real
+  delivery (`attemptedFinalDelivery === true`) but transport failed
+  (`finalDeliveryFailed === true`) and `!userVisibleFinalDelivered`, deliver ONE honest
+  "I prepared a reply but couldn't deliver it — please try again" final. (We deliberately do
+  NOT fire on zero deliverable payloads: that is intentional NO_REPLY/lurk silence, exactly
+  the case PR #23 excluded with `replies.length > 0`.)
+- **Exception backstop** (catch block): if owed and `!userVisibleFinalDelivered`, deliver
+  ONE honest "I hit an error partway through; here's where things stand — please try
+  again" final, then re-throw (preserve existing error propagation/observability).
+- **Feature flag** `OPENCLAW_SILENT_TURN_GUARANTEE` (default ON; `0|false|off` disables).
+- **Idempotency:** every delivery path flips `userVisibleFinalDelivered`; the guard checks
+  it before sending, so it can never double-post when a real answer already went out, and
+  the success-tail + catch backstops are mutually exclusive.
+- **Cannot fire on intentional silence:** NO_REPLY/lurk yields zero payloads and
+  `suppressDelivery`/message-tool-only turns are excluded — same exclusions PR #23 proved.
 
-- Provide concise change summary with touched files, feature-flag name, and gate outcomes.
-- Do not push or open PR.
-- Emit completion event command exactly as requested.
+### Non-redundancy with the 3 existing watchdogs (see RCA §4)
+
+- REL-024a auto-ack (text ack disabled; :eyes: + orphan reconciler) — journalctl-tailing
+  sidecar, fires at 5 min, can ONLY post-mortem recover; can't see in-process terminal
+  outcomes. Our guard fires synchronously at turn-end. The reconciler's `markVisible`
+  observes our delivery in the journal, so no double-fire.
+- slack-silent-turn-watchdog.py — alerts #bug-squasher (observability), never replies to
+  the user. Orthogonal.
+- managed-task-watchdog.py — only watches explicitly-managed background tasks in
+  `tmp/managed-tasks`, not ordinary inbound turns. Orthogonal.
+
+## Phase 3 — Implementation
+
+Edit `src/auto-reply/reply/dispatch-from-config.ts` only. ~5 surgical insertions.
+
+## Phase 4 — Tests
+
+New regression cases in `dispatch-from-config.test.ts`:
+
+1. reasoning-only completion → guard promotes one final (not suppressed)
+2. owed-but-empty (no payloads of any deliverable kind) → honest backstop final
+3. exception in dispatch → catch backstop delivers one final, still throws
+4. suppressed turn → guard does NOT fire
+5. intentional silence (zero replies, not owed) → guard does NOT fire
+6. final-delivery failure (attempted but transport not-ok) → backstop delivers one honest final
+7. real final already delivered → guard does NOT double-send
+8. feature flag off → guard does NOT fire
+
+## Phase 5 — Build & Verify
+
+`node scripts/build-all.mjs` — confirm runtime tsdown bundle builds; the two PRE-EXISTING
+dts errors (manifest 7207aa1aa2: manager.core.ts:608, socket-adapter.ts:28) are not ours.
+Targeted vitest: dispatch-from-config suite green.
+
+## Phase 6 — Handoff
+
+No merge, no gateway restart, no deploy. Report RCA + mechanism + files + tests + build +
+flag name + residual risks to parent for review.
+
+## Residual risks (pre-noted)
+
+- Hard SIGKILL drain-kill (mode 4) not closed here — needs `TimeoutStopSec` alignment
+  (config) + REL-024a reconciler. Documented.
+- Honest-error backstop text is generic by design (no leak of internals on customer
+  surfaces); attorney-voice tenants may want tenant-specific copy later (prompt layer).

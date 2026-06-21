@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { clearAgentHarnesses, registerAgentHarness } from "../../agents/harness/registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
@@ -4019,6 +4019,125 @@ describe("dispatchReplyFromConfig", () => {
     await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
     expect(blockReplySentTexts).not.toContain("thinking...");
     expect(blockReplySentTexts).toContain("The answer is 42");
+  });
+
+  describe("silent-turn delivery guarantee", () => {
+    const SILENT_TURN_FLAG = "OPENCLAW_SILENT_TURN_GUARANTEE";
+    let prevFlag: string | undefined;
+    beforeEach(() => {
+      prevFlag = process.env[SILENT_TURN_FLAG];
+      delete process.env[SILENT_TURN_FLAG]; // default ON
+    });
+    afterEach(() => {
+      if (prevFlag === undefined) {
+        delete process.env[SILENT_TURN_FLAG];
+      } else {
+        process.env[SILENT_TURN_FLAG] = prevFlag;
+      }
+    });
+
+    it("promotes a reasoning-only completion to a final (owed turn, not suppressed)", async () => {
+      setNoAbort();
+      const dispatcher = createDispatcher();
+      const ctx = buildTestCtx({ Provider: "whatsapp" });
+      // Every payload is reasoning-only: without the guard this is a silent turn.
+      const replyResolver = async () =>
+        [
+          { text: "first thought", isReasoning: true },
+          { text: "final reasoning text", isReasoning: true },
+        ] satisfies ReplyPayload[];
+      await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+      const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+      expect(finalCalls).toHaveLength(1);
+      // Promotes the LAST reasoning payload carrying text, with isReasoning cleared.
+      expect(finalCalls[0][0]).toMatchObject({ text: "final reasoning text" });
+      expect(finalCalls[0][0].isReasoning).not.toBe(true);
+    });
+
+    it("does NOT promote reasoning-only when the flag is disabled", async () => {
+      process.env[SILENT_TURN_FLAG] = "0";
+      setNoAbort();
+      const dispatcher = createDispatcher();
+      const ctx = buildTestCtx({ Provider: "whatsapp" });
+      const replyResolver = async () =>
+        [{ text: "only thinking", isReasoning: true }] satisfies ReplyPayload[];
+      await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+      expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+      expect(mocks.routeReply).not.toHaveBeenCalled();
+    });
+
+    it("does NOT fire on intentional silence (zero reply payloads)", async () => {
+      setNoAbort();
+      const dispatcher = createDispatcher();
+      const ctx = buildTestCtx({ Provider: "whatsapp" });
+      const replyResolver = async () => undefined;
+      await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+      expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+      expect(mocks.routeReply).not.toHaveBeenCalled();
+    });
+
+    it("does NOT double-send when a real final was already delivered", async () => {
+      setNoAbort();
+      const dispatcher = createDispatcher();
+      const ctx = buildTestCtx({ Provider: "whatsapp" });
+      const replyResolver = async () =>
+        [
+          { text: "thinking...", isReasoning: true },
+          { text: "the real answer" },
+        ] satisfies ReplyPayload[];
+      await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+      const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+      expect(finalCalls).toHaveLength(1);
+      expect(finalCalls[0][0]).toMatchObject({ text: "the real answer" });
+    });
+
+    it("delivers a final-delivery-failure backstop when transport returns not-ok", async () => {
+      setNoAbort();
+      const dispatcher = createDispatcher();
+      // First send (the real reply) fails; backstop send then succeeds.
+      let call = 0;
+      (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        call += 1;
+        return call === 1 ? false : true;
+      });
+      const ctx = buildTestCtx({ Provider: "whatsapp" });
+      const replyResolver = async () => ({ text: "the answer" }) satisfies ReplyPayload;
+      await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+      const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+      expect(finalCalls.length).toBe(2);
+      expect(String(finalCalls[1][0].text)).toContain("couldn't deliver");
+    });
+
+    it("delivers an exception backstop and still throws on an owed turn", async () => {
+      setNoAbort();
+      const dispatcher = createDispatcher();
+      const ctx = buildTestCtx({ Provider: "whatsapp" });
+      const boom = new Error("dispatch blew up");
+      const replyResolver = async () => {
+        throw boom;
+      };
+      await expect(
+        dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver }),
+      ).rejects.toThrow("dispatch blew up");
+      const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
+      expect(finalCalls).toHaveLength(1);
+      expect(String(finalCalls[0][0].text)).toContain("ran into an error");
+    });
+
+    it("does NOT deliver an exception backstop when the flag is disabled (still throws)", async () => {
+      process.env[SILENT_TURN_FLAG] = "off";
+      setNoAbort();
+      const dispatcher = createDispatcher();
+      const ctx = buildTestCtx({ Provider: "whatsapp" });
+      const replyResolver = async () => {
+        throw new Error("dispatch blew up");
+      };
+      await expect(
+        dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver }),
+      ).rejects.toThrow("dispatch blew up");
+      expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+      expect(mocks.routeReply).not.toHaveBeenCalled();
+    });
   });
 
   it("strips split TTS directives from streamed block text before delivery", async () => {

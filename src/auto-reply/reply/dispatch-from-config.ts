@@ -435,6 +435,51 @@ export async function dispatchReplyFromConfig(
     inboundDedupeReplayUnsafe = true;
   };
 
+  // --- Silent-turn delivery guarantee (feature-flagged, additive, idempotent) ---
+  // Deterministic, code-side guarantee that an owed turn never ends without exactly one
+  // user-visible final. Closes: reasoning-only completion, unhandled dispatch exception,
+  // final-delivery transport failure, and graceful restart aborts. See RCA.md.
+  // Default ON; set OPENCLAW_SILENT_TURN_GUARANTEE=0|false|off to disable.
+  const silentTurnGuaranteeEnabled = (() => {
+    const raw = (process.env.OPENCLAW_SILENT_TURN_GUARANTEE ?? "").trim().toLowerCase();
+    return raw !== "0" && raw !== "false" && raw !== "off";
+  })();
+  // Flipped true by EVERY successful user-visible final delivery (existing paths set it via
+  // the guarded sendFinalPayload wrapper / loop accounting). The guard checks it before
+  // sending so it can never double-post when a real answer already went out.
+  let userVisibleFinalDelivered = false;
+  // Text-only guaranteed delivery primitive shared by the success-tail and catch backstops.
+  // Mirrors sendFinalPayload's route-or-dispatcher fallback but stays dependency-free so it
+  // is safe to call from the catch block. Idempotent: no-op once a final already went out.
+  const deliverGuaranteedFinalText = async (text: string): Promise<boolean> => {
+    if (!silentTurnGuaranteeEnabled || userVisibleFinalDelivered) {
+      return false;
+    }
+    try {
+      const payload: ReplyPayload = { text };
+      const routed = await routeReplyToOriginating(payload);
+      if (routed) {
+        if (routed.ok) {
+          userVisibleFinalDelivered = true;
+        }
+        return routed.ok;
+      }
+      markInboundDedupeReplayUnsafe();
+      const queued = dispatcher.sendFinalReply(payload);
+      if (queued) {
+        userVisibleFinalDelivered = true;
+      }
+      return queued;
+    } catch (guaranteeErr) {
+      logVerbose(
+        `dispatch-from-config: silent-turn guarantee delivery failed (non-fatal): ${formatErrorMessage(
+          guaranteeErr,
+        )}`,
+      );
+      return false;
+    }
+  };
+
   const initialSessionStoreEntry = resolveSessionStoreLookup(ctx, cfg);
   const boundAcpDispatchSessionKey = resolveBoundAcpDispatchSessionKey({ ctx, cfg });
   const acpDispatchSessionKey =
@@ -1571,40 +1616,72 @@ export async function dispatchReplyFromConfig(
       const finalReply = await sendFinalPayload(reply);
       queuedFinal = finalReply.queuedFinal || queuedFinal;
       routedFinalCount += finalReply.routedFinalCount;
+      if (finalReply.queuedFinal || finalReply.routedFinalCount > 0) {
+        userVisibleFinalDelivered = true;
+      }
       if (!finalReply.queuedFinal && finalReply.routedFinalCount === 0) {
         finalDeliveryFailed = true;
       }
     }
 
-    // Deterministic empty-completion guard: when the turn was supposed to deliver
-    // (`!suppressDelivery`) and the model produced reply payloads, but every one was a
-    // reasoning/thinking payload that got skipped above (`attemptedFinalDelivery` still
-    // false), the channel would otherwise emit a silent turn (dispatch_silent: no final,
-    // no tool, no block). That is the reasoning-only-completion failure mode. Promote the
-    // last reasoning payload that carries visible text to a real final so the user is
-    // never left silent on a turn they were owed a reply for.
-    //
-    // This cannot fire on intentional silence: a NO_REPLY/lurk yields zero reply payloads
-    // (`replies.length === 0`), suppressed/message-tool-only turns set `suppressDelivery`,
-    // and any normal final sets `attemptedFinalDelivery` true. It runs once, synchronously,
-    // and once it delivers, `attemptedFinalDelivery` flips true so the success-clear block
-    // and counts accounting stay idempotent (no double-send).
-    if (!suppressDelivery && !attemptedFinalDelivery && replies.length > 0) {
+    // Silent-turn guarantee — reasoning-only promotion (folds in PR #23's proven guard).
+    // When the turn was owed a reply (`!suppressDelivery`) and the model produced reply
+    // payloads, but every one was a reasoning payload skipped above (`attemptedFinalDelivery`
+    // still false), the channel would otherwise emit a silent turn. Promote the last
+    // reasoning payload carrying visible text to a real final. Cannot fire on intentional
+    // silence (NO_REPLY/lurk yields zero payloads → `replies.length === 0`), suppressed
+    // turns, or normal replies; idempotent (delivery flips `userVisibleFinalDelivered`).
+    if (
+      silentTurnGuaranteeEnabled &&
+      !suppressDelivery &&
+      !attemptedFinalDelivery &&
+      !userVisibleFinalDelivered &&
+      replies.length > 0
+    ) {
       const reasoningFallback = [...replies]
         .reverse()
         .find((reply) => reply.isReasoning === true && (reply.text ?? "").trim().length > 0);
       if (reasoningFallback) {
         const promotedFinal: ReplyPayload = { ...reasoningFallback, isReasoning: false };
         logVerbose(
-          `dispatch-from-config: empty-completion guard promoting reasoning-only payload to final (session=${sessionKey ?? "unknown"})`,
+          `dispatch-from-config: silent-turn guarantee promoting reasoning-only payload to final (session=${
+            sessionKey ?? "unknown"
+          })`,
         );
         attemptedFinalDelivery = true;
         const finalReply = await sendFinalPayload(promotedFinal);
         queuedFinal = finalReply.queuedFinal || queuedFinal;
         routedFinalCount += finalReply.routedFinalCount;
+        if (finalReply.queuedFinal || finalReply.routedFinalCount > 0) {
+          userVisibleFinalDelivered = true;
+        }
         if (!finalReply.queuedFinal && finalReply.routedFinalCount === 0) {
           finalDeliveryFailed = true;
         }
+      }
+    }
+
+    // Silent-turn guarantee — final-delivery-failure backstop. The turn DID attempt a real
+    // delivery but transport failed (route/dispatcher not-ok). Rather than leave the owed
+    // user silent, deliver one honest, internals-free "prepared but couldn't deliver" final.
+    // Deliberately NOT fired on zero deliverable payloads (intentional NO_REPLY/lurk).
+    if (
+      silentTurnGuaranteeEnabled &&
+      !suppressDelivery &&
+      attemptedFinalDelivery &&
+      finalDeliveryFailed &&
+      !userVisibleFinalDelivered
+    ) {
+      const delivered = await deliverGuaranteedFinalText(
+        "\u26a0\ufe0f I prepared a reply but couldn't deliver it just now. Please try again in a moment.",
+      );
+      if (delivered) {
+        queuedFinal = true;
+        logVerbose(
+          `dispatch-from-config: silent-turn guarantee delivered final-delivery-failure backstop (session=${
+            sessionKey ?? "unknown"
+          })`,
+        );
       }
     }
 
@@ -1699,6 +1776,20 @@ export async function dispatchReplyFromConfig(
     }
     recordProcessed("error", { error: String(err) });
     markIdle("message_error");
+    // Silent-turn guarantee — exception backstop. An exception escaped the dispatch body on a
+    // turn the user was owed a reply for and nothing user-visible has gone out. Deliver ONE
+    // honest, internals-free "hit an error" final so the user is never left silent, then
+    // preserve the existing throw so upstream error propagation/observability is unchanged.
+    // Idempotent: deliverGuaranteedFinalText is a no-op if a real answer already went out.
+    if (silentTurnGuaranteeEnabled && !suppressDelivery && !userVisibleFinalDelivered) {
+      try {
+        await deliverGuaranteedFinalText(
+          "\u26a0\ufe0f I ran into an error partway through and couldn't finish that one. Please try again in a moment.",
+        );
+      } catch {
+        // Never let the backstop mask the original error.
+      }
+    }
     throw err;
   }
 }
