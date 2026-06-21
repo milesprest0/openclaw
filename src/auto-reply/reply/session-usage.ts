@@ -12,7 +12,12 @@ import {
 } from "../../config/sessions.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
-import { buildPctFull, logTokenUsageRecord } from "../../logging/token-usage-log.js";
+import {
+  buildPctFull,
+  logPromptInstrumentationRecord,
+  logTokenUsageRecord,
+  type PromptInstrumentationRecord,
+} from "../../logging/token-usage-log.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 
 function applyCliSessionIdToSessionPatch(
@@ -67,6 +72,52 @@ function estimateSessionRunCostUsd(params: {
     config: params.cfg,
   });
   return resolveNonNegativeNumber(estimateUsageCost({ usage: params.usage, cost }));
+}
+
+function buildPromptInstrumentationRecord(params: {
+  sessionKey: string;
+  sessionId: string;
+  model?: string;
+  provider?: string;
+  promptTokens?: number;
+  report: SessionSystemPromptReport;
+}): PromptInstrumentationRecord {
+  const injectedChars = params.report.injectedWorkspaceFiles.reduce(
+    (sum, file) => sum + (file.injectedChars ?? 0),
+    0,
+  );
+  return {
+    generatedAt: new Date().toISOString(),
+    sessionKey: params.sessionKey,
+    sessionId: params.sessionId,
+    model: params.model,
+    provider: params.provider,
+    promptTokens: params.promptTokens,
+    systemPrompt: {
+      chars: params.report.systemPrompt.chars,
+      projectContextChars: params.report.systemPrompt.projectContextChars,
+      nonProjectContextChars: params.report.systemPrompt.nonProjectContextChars,
+    },
+    tools: {
+      schemaChars: params.report.tools.schemaChars,
+    },
+    skills: {
+      promptChars: params.report.skills.promptChars,
+    },
+    injectedWorkspaceFiles: {
+      count: params.report.injectedWorkspaceFiles.length,
+      injectedChars,
+    },
+    // PHASE1-HOOK: attach per-turn retrieval hits once retrieval results are
+    // available in this run context.
+    retrieval: {
+      available: false,
+    },
+    qualityProxy: {
+      evalPassRate: null,
+      regret: null,
+    },
+  };
 }
 
 export async function persistSessionUsageUpdate(params: {
@@ -180,6 +231,22 @@ export async function persistSessionUsageUpdate(params: {
             },
             cfg,
           );
+          const promptInstrumentationReport = params.systemPromptReport ?? entry.systemPromptReport;
+          const promptInstrumentationEnabled =
+            cfg.observability?.promptInstrumentation?.enabled === true;
+          if (promptInstrumentationEnabled && hasUsage && promptInstrumentationReport) {
+            void logPromptInstrumentationRecord(
+              buildPromptInstrumentationRecord({
+                sessionKey,
+                sessionId: entry.sessionId,
+                model: params.modelUsed ?? entry.model,
+                provider: params.providerUsed ?? entry.modelProvider,
+                promptTokens: params.promptTokens,
+                report: promptInstrumentationReport,
+              }),
+              cfg,
+            );
+          }
           return applyCliSessionIdToSessionPatch(params, entry, patch);
         },
       });

@@ -268,6 +268,15 @@ export type LoggingConfig = {
   tokenUsageLog?: boolean;
 };
 
+export type PromptInstrumentationConfig = {
+  /** Emit per-turn prompt/context instrumentation telemetry. Default: false (off). */
+  enabled?: boolean;
+};
+
+export type ObservabilityConfig = {
+  promptInstrumentation?: PromptInstrumentationConfig;
+};
+
 export type DiagnosticsOtelConfig = {
   enabled?: boolean;
   endpoint?: string;

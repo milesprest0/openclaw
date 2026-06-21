@@ -32,6 +32,12 @@ export const FIELD_HELP: Record<string, string> = {
     "OpenTelemetry export settings for traces, metrics, and logs emitted by gateway components. Use this when integrating with centralized observability backends and distributed tracing pipelines.",
   "diagnostics.cacheTrace":
     "Cache-trace logging settings for observing cache decisions and payload context in embedded runs. Enable this temporarily for debugging and disable afterward to reduce sensitive log footprint.",
+  observability:
+    "Optional structured observability signals that can be shipped dark behind explicit config flags. Keep disabled by default and enable only while collecting targeted telemetry.",
+  "observability.promptInstrumentation":
+    "Per-turn prompt/context telemetry controls for promptTokens plus system prompt breakdown rollups. This is additive instrumentation only and does not alter prompt assembly behavior.",
+  "observability.promptInstrumentation.enabled":
+    "Enables per-turn prompt/context instrumentation emission. Default: false (off). Turn on only when collecting rollout evidence for prompt-size and retrieval experiments.",
   logging:
     "Logging behavior controls for severity, output destinations, formatting, and sensitive-data redaction. Keep levels and redaction strict enough for production while preserving useful diagnostics.",
   "logging.level":
