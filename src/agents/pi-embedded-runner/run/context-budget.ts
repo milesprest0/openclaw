@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { estimateTokens } from "@mariozechner/pi-coding-agent";
 import type {
   AgentContextBudgetConfig,
   AgentContextBudgetOverrideConfig,
+  AgentHistoryOptimizationConfig,
   AgentContextBudgetTargetBandConfig,
 } from "../../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
@@ -10,10 +12,13 @@ import { normalizeOptionalAccountId } from "../../../routing/session-key.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
 import { SAFETY_MARGIN, estimateMessagesTokens } from "../../compaction.js";
 import { log } from "../logger.js";
+import { truncateToolResultText } from "../tool-result-truncation.js";
 
 const DEFAULT_MAX_ASSEMBLED_RATIO = 0.6;
 const DEFAULT_PER_THREAD_MAX_IMAGES = 8;
 const DEFAULT_RESERVE_TOKENS = 20_000;
+const DEFAULT_HISTORY_KEEP_RAW_TURNS = 3;
+const DEFAULT_OLD_TOOL_RESULT_MAX_CHARS = 2_000;
 
 export const CONTEXT_BUDGET_IMAGE_PLACEHOLDER = "[image data removed - context budget image cap]";
 
@@ -45,7 +50,27 @@ export type ContextBudgetGuardResult = {
   imageBlocksPruned: number;
   droppedTurns: number;
   targetBandEnabled: boolean;
+  historyDigestEnabled: boolean;
+  historyDigested: boolean;
+  historyBeforeChars: number;
+  historyAfterChars: number;
+  digestedToolResults: number;
+  keepRawTurns: number;
+  oldToolResultMaxChars: number;
   applied: boolean;
+};
+
+type ResolvedHistoryOptimization = {
+  digestOldToolResults: boolean;
+  keepRawTurns: number;
+  oldToolResultMaxChars: number;
+};
+
+type HistoryDigestStats = {
+  messages: AgentMessage[];
+  beforeChars: number;
+  afterChars: number;
+  digestedToolResults: number;
 };
 
 function normalizePositiveInt(value: unknown): number | undefined {
@@ -62,6 +87,227 @@ function normalizeNonNegativeInt(value: unknown): number | undefined {
   }
   const next = Math.floor(value);
   return next >= 0 ? next : undefined;
+}
+
+function resolveHistoryOptimization(cfg?: OpenClawConfig): ResolvedHistoryOptimization {
+  const optimization: AgentHistoryOptimizationConfig | undefined =
+    cfg?.agents?.defaults?.historyOptimization;
+  return {
+    digestOldToolResults: optimization?.digestOldToolResults === true,
+    keepRawTurns:
+      normalizeNonNegativeInt(optimization?.keepRawTurns) ?? DEFAULT_HISTORY_KEEP_RAW_TURNS,
+    oldToolResultMaxChars:
+      normalizePositiveInt(optimization?.oldToolResultMaxChars) ??
+      DEFAULT_OLD_TOOL_RESULT_MAX_CHARS,
+  };
+}
+
+function getMessageText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  const chunks: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const blockType = (block as { type?: unknown }).type;
+    if (blockType !== "text") {
+      continue;
+    }
+    const text = (block as { text?: unknown }).text;
+    if (typeof text === "string" && text.length > 0) {
+      chunks.push(text);
+    }
+  }
+  return chunks.join("\n");
+}
+
+function collectIdentifiers(text: string): string[] {
+  const matches = text.match(
+    /https?:\/\/\S+|(?:\/|[A-Za-z]:\\)[^\s"')]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b[A-Z]{2,}-\d+\b|\b\d{5,}\b/giu,
+  );
+  if (!matches) {
+    return [];
+  }
+  return Array.from(new Set(matches.map((value) => value.trim()).filter(Boolean))).slice(0, 24);
+}
+
+function digestToolResultText(params: {
+  text: string;
+  toolName?: string;
+  argsSeed?: string;
+  maxChars: number;
+}): string {
+  const compact = params.text.replace(/\s+/gu, " ").trim();
+  const idsPreserved = collectIdentifiers(params.text);
+  const argsHash = createHash("sha1")
+    .update(params.argsSeed ?? compact)
+    .digest("hex")
+    .slice(0, 10);
+  const keyFacts = truncateToolResultText(
+    compact,
+    Math.max(120, Math.floor(params.maxChars * 0.5)),
+  );
+  const outcome = /\b(error|failed|exception|fatal|traceback)\b/iu.test(compact) ? "error" : "ok";
+  const digest = {
+    tool: params.toolName ?? "unknown",
+    argsHash,
+    outcome,
+    keyFacts,
+    idsPreserved,
+  };
+  const rendered = JSON.stringify(digest);
+  if (rendered.length <= params.maxChars) {
+    return rendered;
+  }
+  const preservedPrefix = JSON.stringify({
+    tool: digest.tool,
+    argsHash: digest.argsHash,
+    outcome: digest.outcome,
+    idsPreserved: digest.idsPreserved,
+  });
+  const remaining = Math.max(16, params.maxChars - preservedPrefix.length - 32);
+  const keyFactsBounded = truncateToolResultText(keyFacts, remaining);
+  return JSON.stringify({
+    tool: digest.tool,
+    argsHash: digest.argsHash,
+    outcome: digest.outcome,
+    keyFacts: keyFactsBounded,
+    idsPreserved: digest.idsPreserved,
+  });
+}
+
+function resolveDigestCutoffIndex(messages: AgentMessage[], keepRawTurns: number): number {
+  const userIndexes: number[] = [];
+  for (let i = 0; i < messages.length; i += 1) {
+    if (messages[i]?.role === "user") {
+      userIndexes.push(i);
+    }
+  }
+  if (userIndexes.length === 0) {
+    return -1;
+  }
+  const lastUserIndex = userIndexes[userIndexes.length - 1] ?? -1;
+  if (lastUserIndex < 0) {
+    return -1;
+  }
+  if (keepRawTurns <= 0) {
+    return lastUserIndex;
+  }
+  const keepStartUserIndex =
+    userIndexes[Math.max(0, userIndexes.length - keepRawTurns)] ?? lastUserIndex;
+  return Math.min(lastUserIndex, keepStartUserIndex);
+}
+
+function digestOldToolResultsWithStats(
+  messages: AgentMessage[],
+  opts: { keepRawTurns: number; oldToolResultMaxChars: number },
+): HistoryDigestStats {
+  if (messages.length === 0) {
+    return { messages, beforeChars: 0, afterChars: 0, digestedToolResults: 0 };
+  }
+  const cutoffIndex = resolveDigestCutoffIndex(messages, opts.keepRawTurns);
+  if (cutoffIndex <= 0) {
+    return { messages, beforeChars: 0, afterChars: 0, digestedToolResults: 0 };
+  }
+
+  let nextMessages: AgentMessage[] | undefined;
+  let beforeChars = 0;
+  let afterChars = 0;
+  let digestedToolResults = 0;
+
+  for (let i = 0; i < cutoffIndex; i += 1) {
+    const message = messages[i];
+    if (!message) {
+      continue;
+    }
+    if ((message as { role?: unknown }).role === "toolResult") {
+      const text = getMessageText((message as { content?: unknown }).content);
+      if (!text) {
+        continue;
+      }
+      const digestText = digestToolResultText({
+        text,
+        toolName: (message as { toolName?: unknown }).toolName as string | undefined,
+        argsSeed: JSON.stringify((message as { toolCallId?: unknown }).toolCallId ?? text),
+        maxChars: opts.oldToolResultMaxChars,
+      });
+      beforeChars += text.length;
+      afterChars += digestText.length;
+      digestedToolResults += 1;
+      nextMessages ??= messages.slice();
+      nextMessages[i] = {
+        ...message,
+        content: [{ type: "text", text: digestText }],
+      } as AgentMessage;
+      continue;
+    }
+
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content) || content.length === 0) {
+      continue;
+    }
+    let nextContent: unknown[] | undefined;
+    for (let blockIndex = 0; blockIndex < content.length; blockIndex += 1) {
+      const block = content[blockIndex];
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+      const blockType = (block as { type?: unknown }).type;
+      if (
+        blockType !== "tool_result" &&
+        blockType !== "tool-result" &&
+        blockType !== "toolResult"
+      ) {
+        continue;
+      }
+      const rawText = (() => {
+        const text = (block as { text?: unknown }).text;
+        if (typeof text === "string") {
+          return text;
+        }
+        const contentValue = (block as { content?: unknown }).content;
+        return typeof contentValue === "string" ? contentValue : "";
+      })();
+      if (!rawText) {
+        continue;
+      }
+      const digestText = digestToolResultText({
+        text: rawText,
+        toolName: (block as { toolName?: unknown }).toolName as string | undefined,
+        argsSeed: JSON.stringify((block as { toolCallId?: unknown }).toolCallId ?? rawText),
+        maxChars: opts.oldToolResultMaxChars,
+      });
+      beforeChars += rawText.length;
+      afterChars += digestText.length;
+      digestedToolResults += 1;
+      nextContent ??= content.slice();
+      nextContent[blockIndex] = { type: "text", text: digestText };
+    }
+    if (!nextContent) {
+      continue;
+    }
+    nextMessages ??= messages.slice();
+    nextMessages[i] = { ...message, content: nextContent } as AgentMessage;
+  }
+
+  return {
+    messages: nextMessages ?? messages,
+    beforeChars,
+    afterChars,
+    digestedToolResults,
+  };
+}
+
+export function digestOldToolResults(
+  messages: AgentMessage[],
+  opts: { keepRawTurns: number; oldToolResultMaxChars: number },
+): AgentMessage[] {
+  return digestOldToolResultsWithStats(messages, opts).messages;
 }
 
 function normalizeTargetBand(value: AgentContextBudgetTargetBandConfig | undefined):
@@ -284,11 +530,24 @@ export function applyContextBudgetGuard(params: {
   });
   let currentMessages = params.messages;
   let droppedTurns = 0;
+  const historyOptimization = resolveHistoryOptimization(params.cfg);
   const aged = ageOutOldestInlineImages({
     messages: currentMessages,
     perThreadMaxImages: budget.perThreadMaxImages,
   });
   currentMessages = aged.messages;
+  const digested = historyOptimization.digestOldToolResults
+    ? digestOldToolResultsWithStats(currentMessages, {
+        keepRawTurns: historyOptimization.keepRawTurns,
+        oldToolResultMaxChars: historyOptimization.oldToolResultMaxChars,
+      })
+    : {
+        messages: currentMessages,
+        beforeChars: 0,
+        afterChars: 0,
+        digestedToolResults: 0,
+      };
+  currentMessages = digested.messages;
   let estimatedTokens = estimateAssembledTokens({
     messages: currentMessages,
     systemPrompt: params.systemPrompt,
@@ -305,7 +564,14 @@ export function applyContextBudgetGuard(params: {
       imageBlocksPruned: aged.prunedCount,
       droppedTurns,
       targetBandEnabled: !!budget.targetBand,
-      applied: aged.prunedCount > 0,
+      historyDigestEnabled: historyOptimization.digestOldToolResults,
+      historyDigested: digested.digestedToolResults > 0,
+      historyBeforeChars: digested.beforeChars,
+      historyAfterChars: digested.afterChars,
+      digestedToolResults: digested.digestedToolResults,
+      keepRawTurns: historyOptimization.keepRawTurns,
+      oldToolResultMaxChars: historyOptimization.oldToolResultMaxChars,
+      applied: aged.prunedCount > 0 || digested.digestedToolResults > 0,
     };
   }
 
@@ -344,7 +610,14 @@ export function applyContextBudgetGuard(params: {
     imageBlocksPruned: aged.prunedCount,
     droppedTurns,
     targetBandEnabled: !!budget.targetBand,
-    applied: aged.prunedCount > 0 || droppedTurns > 0,
+    historyDigestEnabled: historyOptimization.digestOldToolResults,
+    historyDigested: digested.digestedToolResults > 0,
+    historyBeforeChars: digested.beforeChars,
+    historyAfterChars: digested.afterChars,
+    digestedToolResults: digested.digestedToolResults,
+    keepRawTurns: historyOptimization.keepRawTurns,
+    oldToolResultMaxChars: historyOptimization.oldToolResultMaxChars,
+    applied: aged.prunedCount > 0 || droppedTurns > 0 || digested.digestedToolResults > 0,
   };
 }
 

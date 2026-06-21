@@ -6,12 +6,14 @@ import {
   hasNativeApprovalPromptRuntimeCapability,
   isKnownNativeApprovalPromptChannel,
 } from "../channels/plugins/native-approval-prompt.js";
+import type { AgentProjectContextOptimizationConfig } from "../config/types.agent-defaults.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
 import { buildMemoryPromptSection } from "../plugins/memory-state.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "../shared/string-coerce.js";
+import { truncateUtf16Safe } from "../utils.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 import type { BootstrapMode } from "./bootstrap-mode.js";
 import {
@@ -28,6 +30,7 @@ import {
   normalizePromptCapabilityIds,
   normalizeStructuredPromptSection,
 } from "./prompt-cache-stability.js";
+import { assertProtectedLinesPresent, extractProtectedLines } from "./prompt-invariants.js";
 import { sanitizeForPromptLiteral } from "./sanitize-for-prompt.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "./system-prompt-cache-boundary.js";
 import type {
@@ -63,6 +66,19 @@ const DYNAMIC_CONTEXT_FILE_BASENAMES = new Set(["heartbeat.md", "memory.md"]);
 const DEFAULT_HEARTBEAT_PROMPT_CONTEXT_BLOCK =
   "Default heartbeat prompt:\n`Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.`";
 const SYSTEM_PROMPT_STABLE_PREFIX_CACHE_LIMIT = 64;
+const DEFAULT_PROJECT_CONTEXT_MAX_CHARS = 48_000;
+
+export type ProjectContextDietDiagnostic = {
+  beforeChars: number;
+  afterChars: number;
+  regionsInlined: number;
+  regionsPointered: number;
+};
+
+type ResolvedProjectContextOptimization = {
+  dietToRetrieval: boolean;
+  maxChars: number;
+};
 
 type StablePromptPrefixCacheEntry = {
   value: string;
@@ -138,14 +154,98 @@ function sortContextFilesForPrompt(contextFiles: EmbeddedContextFile[]): Embedde
   });
 }
 
+function resolveProjectContextOptimization(
+  config?: AgentProjectContextOptimizationConfig,
+): ResolvedProjectContextOptimization {
+  return {
+    dietToRetrieval: config?.dietToRetrieval === true,
+    maxChars: config?.maxChars ?? DEFAULT_PROJECT_CONTEXT_MAX_CHARS,
+  };
+}
+
+type ProjectContextRegion = {
+  topic: string;
+  text: string;
+  containsProtectedLine: boolean;
+};
+
+const MARKDOWN_HEADING_RE = /^(#{1,6})\s+(.+)$/u;
+
+function classifyContextRegions(file: EmbeddedContextFile): {
+  inline: ProjectContextRegion[];
+  onDemand: ProjectContextRegion[];
+} {
+  const lines = file.content.split("\n");
+  const regions: ProjectContextRegion[] = [];
+  let currentTopic = "preamble";
+  let currentLines: string[] = [];
+
+  const pushRegion = () => {
+    if (currentLines.length === 0) {
+      return;
+    }
+    const text = currentLines.join("\n").trim();
+    if (text.length === 0) {
+      currentLines = [];
+      return;
+    }
+    regions.push({
+      topic: currentTopic,
+      text,
+      containsProtectedLine: extractProtectedLines(text).length > 0,
+    });
+    currentLines = [];
+  };
+
+  for (const line of lines) {
+    const headingMatch = line.match(MARKDOWN_HEADING_RE);
+    if (headingMatch) {
+      pushRegion();
+      currentTopic = headingMatch[2]?.trim() || "section";
+      currentLines.push(line);
+      continue;
+    }
+    currentLines.push(line);
+  }
+  pushRegion();
+
+  const basename = getContextFileBasename(file.path);
+  const forceInlineWholeFile = basename === "user.md" || basename === "identity.md";
+  if (forceInlineWholeFile) {
+    return { inline: regions, onDemand: [] };
+  }
+  return {
+    inline: regions.filter((region) => region.containsProtectedLine),
+    onDemand: regions.filter((region) => !region.containsProtectedLine),
+  };
+}
+
+function pointerLineForRegion(topic: string): string {
+  return `↳ ${topic} — load via memory_search when relevant`;
+}
+
+function clampProjectContextChars(lines: string[], maxChars: number): string[] {
+  const rendered = lines.join("\n");
+  if (rendered.length <= maxChars) {
+    return lines;
+  }
+  const marker = "\n\n[…project context truncated — load via memory_search/read…]";
+  const budget = Math.max(0, maxChars - marker.length);
+  const head = truncateUtf16Safe(rendered, budget);
+  return `${head}${marker}`.split("\n");
+}
+
 function buildProjectContextSection(params: {
   files: EmbeddedContextFile[];
   heading: string;
   dynamic: boolean;
+  optimization?: AgentProjectContextOptimizationConfig;
+  onDietDiagnostic?: (diagnostic: ProjectContextDietDiagnostic) => void;
 }) {
   if (params.files.length === 0) {
     return [];
   }
+  const optimization = resolveProjectContextOptimization(params.optimization);
   const lines = [params.heading, ""];
   if (params.dynamic) {
     lines.push(
@@ -164,10 +264,56 @@ function buildProjectContextSection(params: {
     }
     lines.push("");
   }
-  for (const file of params.files) {
-    lines.push(`## ${file.path}`, "", sanitizeContextFileContentForPrompt(file.content), "");
+
+  if (!optimization.dietToRetrieval) {
+    for (const file of params.files) {
+      lines.push(`## ${file.path}`, "", sanitizeContextFileContentForPrompt(file.content), "");
+    }
+    return lines;
   }
-  return lines;
+
+  const normalizedFiles = params.files.map((file) => ({
+    ...file,
+    content: sanitizeContextFileContentForPrompt(file.content),
+  }));
+  const protectedLines = normalizedFiles.flatMap((file) => extractProtectedLines(file.content));
+  let regionsInlined = 0;
+  let regionsPointered = 0;
+
+  for (const file of normalizedFiles) {
+    lines.push(`## ${file.path}`, "");
+    const classified = classifyContextRegions(file);
+    for (const region of classified.inline) {
+      lines.push(region.text, "");
+      regionsInlined += 1;
+    }
+    for (const region of classified.onDemand) {
+      lines.push(pointerLineForRegion(region.topic), "");
+      regionsPointered += 1;
+    }
+  }
+
+  const presence = assertProtectedLinesPresent(lines.join("\n"), protectedLines);
+  if (!presence.ok) {
+    throw new Error(
+      `[project-context-optimization] protected lines missing from inline render: ${presence.missing.join(" | ")}`,
+    );
+  }
+
+  const cappedLines = clampProjectContextChars(lines, optimization.maxChars);
+  params.onDietDiagnostic?.({
+    beforeChars: lines.join("\n").length,
+    afterChars: cappedLines.join("\n").length,
+    regionsInlined,
+    regionsPointered,
+  });
+  const cappedPresence = assertProtectedLinesPresent(cappedLines.join("\n"), protectedLines);
+  if (!cappedPresence.ok) {
+    throw new Error(
+      `[project-context-optimization] maxChars cap removed protected lines: ${cappedPresence.missing.join(" | ")}`,
+    );
+  }
+  return cappedLines;
 }
 
 function buildHeartbeatSection(params: { isMinimal: boolean; heartbeatPrompt?: string }) {
@@ -613,6 +759,8 @@ export function buildAgentSystemPrompt(params: {
   includeMemorySection?: boolean;
   memoryCitationsMode?: MemoryCitationsMode;
   promptContribution?: ProviderSystemPromptContribution;
+  projectContextOptimization?: AgentProjectContextOptimizationConfig;
+  onProjectContextDietDiagnostic?: (diagnostic: ProjectContextDietDiagnostic) => void;
 }) {
   const acpEnabled = params.acpEnabled === true;
   const sandboxedRuntime = params.sandboxInfo?.enabled === true;
@@ -873,6 +1021,7 @@ export function buildAgentSystemPrompt(params: {
     memorySection,
     acpEnabled,
     stableContextFiles,
+    projectContextOptimization: params.projectContextOptimization,
   });
   const stablePrefix = cacheStablePromptPrefix(stablePrefixCacheKey, () => {
     const lines = [
@@ -1088,6 +1237,8 @@ export function buildAgentSystemPrompt(params: {
         files: stableContextFiles,
         heading: "# Project Context",
         dynamic: false,
+        optimization: params.projectContextOptimization,
+        onDietDiagnostic: params.onProjectContextDietDiagnostic,
       }),
     );
 
@@ -1119,6 +1270,8 @@ export function buildAgentSystemPrompt(params: {
       files: dynamicContextFiles,
       heading: stableContextFiles.length > 0 ? "# Dynamic Project Context" : "# Project Context",
       dynamic: true,
+      optimization: params.projectContextOptimization,
+      onDietDiagnostic: params.onProjectContextDietDiagnostic,
     }),
   );
 

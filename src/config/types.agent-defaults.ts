@@ -307,6 +307,10 @@ export type AgentDefaultsConfig = {
   toolExposure?: AgentToolExposureConfig;
   /** Prompt-time skill description optimization controls. */
   skillsPromptOptimization?: AgentSkillsPromptOptimizationConfig;
+  /** Prompt-time project context optimization controls. */
+  projectContextOptimization?: AgentProjectContextOptimizationConfig;
+  /** Prompt-time history optimization controls. */
+  historyOptimization?: AgentHistoryOptimizationConfig;
   /** Embedded Pi runner hardening and compatibility controls. */
   embeddedPi?: {
     /**
@@ -518,6 +522,22 @@ export type AgentSkillsPromptOptimizationConfig = {
   trimDescriptions?: boolean;
   /** Maximum characters per skill description when trimming is enabled (default: 160). */
   maxDescriptionChars?: number;
+};
+
+export type AgentProjectContextOptimizationConfig = {
+  /** Replace non-protected project-context regions with retrieval pointers (default: false). */
+  dietToRetrieval?: boolean;
+  /** Max rendered project-context chars when dieting is enabled (default: 48000). */
+  maxChars?: number;
+};
+
+export type AgentHistoryOptimizationConfig = {
+  /** Digest old tool results before oldest-turn dropping (default: false). */
+  digestOldToolResults?: boolean;
+  /** Keep this many most-recent turns fully raw (default: 3). */
+  keepRawTurns?: number;
+  /** Per-digest cap for older tool-result text blocks (default: 2000). */
+  oldToolResultMaxChars?: number;
 };
 
 export type AgentCompactionMode = "default" | "safeguard";

@@ -1315,6 +1315,12 @@ export async function runEmbeddedAttempt(
       config: params.config,
       agentId: sessionAgentId,
     });
+    const projectContextDietDiagnostics: Array<{
+      beforeChars: number;
+      afterChars: number;
+      regionsInlined: number;
+      regionsPointered: number;
+    }> = [];
     const attemptSystemPrompt = buildAttemptSystemPrompt({
       isRawModelRun,
       systemPromptOverrideText,
@@ -1357,6 +1363,10 @@ export async function runEmbeddedAttempt(
         includeMemorySection: !activeContextEngine || activeContextEngine.info.id === "legacy",
         memoryCitationsMode: params.config?.memory?.citations,
         promptContribution,
+        projectContextOptimization: params.config?.agents?.defaults?.projectContextOptimization,
+        onProjectContextDietDiagnostic: (diagnostic) => {
+          projectContextDietDiagnostics.push(diagnostic);
+        },
       },
       providerTransform: {
         provider: params.provider,
@@ -1406,6 +1416,36 @@ export async function runEmbeddedAttempt(
     });
     const systemPromptOverride = attemptSystemPrompt.systemPromptOverride;
     let systemPromptText = systemPromptOverride();
+    if (projectContextDietDiagnostics.length > 0) {
+      const aggregate = projectContextDietDiagnostics.reduce(
+        (acc, entry) => ({
+          beforeChars: acc.beforeChars + entry.beforeChars,
+          afterChars: acc.afterChars + entry.afterChars,
+          regionsInlined: acc.regionsInlined + entry.regionsInlined,
+          regionsPointered: acc.regionsPointered + entry.regionsPointered,
+        }),
+        {
+          beforeChars: 0,
+          afterChars: 0,
+          regionsInlined: 0,
+          regionsPointered: 0,
+        },
+      );
+      emitTrustedDiagnosticEvent({
+        type: "context.projectContext.dieted",
+        runId: params.runId,
+        ...(params.sessionKey && { sessionKey: params.sessionKey }),
+        ...(params.sessionId && { sessionId: params.sessionId }),
+        provider: params.provider,
+        model: params.modelId,
+        trigger: params.trigger,
+        beforeChars: aggregate.beforeChars,
+        afterChars: aggregate.afterChars,
+        regionsInlined: aggregate.regionsInlined,
+        regionsPointered: aggregate.regionsPointered,
+        trace: freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(runTrace)),
+      });
+    }
     prepStages.mark("system-prompt");
 
     // Keep the session lock scoped to transcript/session mutations. Cold plugin
@@ -3088,10 +3128,34 @@ export async function runEmbeddedAttempt(
                 imageBlocksPruned: 0,
                 droppedTurns: 0,
                 targetBandEnabled: false,
+                historyDigestEnabled: false,
+                historyDigested: false,
+                historyBeforeChars: 0,
+                historyAfterChars: 0,
+                digestedToolResults: 0,
+                keepRawTurns: 3,
+                oldToolResultMaxChars: 2_000,
                 applied: false,
               };
             }
           })();
+          if (contextBudgetGuard.historyDigestEnabled) {
+            emitTrustedDiagnosticEvent({
+              type: "context.history.digested",
+              runId: params.runId,
+              ...(params.sessionKey && { sessionKey: params.sessionKey }),
+              ...(params.sessionId && { sessionId: params.sessionId }),
+              provider: params.provider,
+              model: params.modelId,
+              trigger: params.trigger,
+              beforeChars: contextBudgetGuard.historyBeforeChars,
+              afterChars: contextBudgetGuard.historyAfterChars,
+              digestedToolResults: contextBudgetGuard.digestedToolResults,
+              keepRawTurns: contextBudgetGuard.keepRawTurns,
+              oldToolResultMaxChars: contextBudgetGuard.oldToolResultMaxChars,
+              trace: freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(runTrace)),
+            });
+          }
           if (contextBudgetGuard.applied) {
             activeSession.agent.state.messages = contextBudgetGuard.messages;
             log.info(

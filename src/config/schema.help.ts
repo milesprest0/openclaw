@@ -1416,6 +1416,20 @@ export const FIELD_HELP: Record<string, string> = {
     "Trim available-skills description text to a deterministic selection-signal prefix (default: false). Disable to keep full descriptions byte-identical to upstream formatting.",
   "agents.defaults.skillsPromptOptimization.maxDescriptionChars":
     "Maximum characters to keep per available-skills description when trimDescriptions is enabled (default: 160). Trimming happens at a word boundary and appends an ellipsis.",
+  "agents.defaults.projectContextOptimization":
+    "Prompt-time project-context optimization controls. Keep disabled by default to preserve byte-identical Project Context rendering unless you explicitly opt in.",
+  "agents.defaults.projectContextOptimization.dietToRetrieval":
+    "Replace non-protected long-form Project Context regions with retrieval pointers (default: false). Protected HARD/identity lines remain inline.",
+  "agents.defaults.projectContextOptimization.maxChars":
+    "Maximum rendered Project Context characters when dietToRetrieval is enabled (default: 48000).",
+  "agents.defaults.historyOptimization":
+    "Prompt-time history optimization controls for digesting older tool results while preserving recent turns raw.",
+  "agents.defaults.historyOptimization.digestOldToolResults":
+    "Digest old tool-result blocks before oldest-turn dropping in the context budget guard (default: false).",
+  "agents.defaults.historyOptimization.keepRawTurns":
+    "Number of most-recent turns to keep fully raw when old-tool-result digesting is enabled (default: 3).",
+  "agents.defaults.historyOptimization.oldToolResultMaxChars":
+    "Per-digest character cap for older tool-result text when history optimization is enabled (default: 2000).",
   "agents.defaults.embeddedPi":
     "Embedded Pi runner hardening controls for how workspace-local Pi settings are trusted and applied in OpenClaw sessions.",
   "agents.defaults.embeddedPi.projectSettingsPolicy":

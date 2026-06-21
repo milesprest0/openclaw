@@ -244,6 +244,121 @@ describe("agent defaults schema", () => {
     });
   });
 
+  it("accepts agents.defaults.projectContextOptimization", () => {
+    const defaults = AgentDefaultsSchema.parse({
+      projectContextOptimization: {
+        dietToRetrieval: true,
+        maxChars: 42_000,
+      },
+    })!;
+
+    expect(defaults.projectContextOptimization?.dietToRetrieval).toBe(true);
+    expect(defaults.projectContextOptimization?.maxChars).toBe(42_000);
+  });
+
+  it("round-trips projectContextOptimization and resolves default-off/default-48000", () => {
+    const parsedDefaults = AgentDefaultsSchema.parse({})!;
+    expect(parsedDefaults.projectContextOptimization?.dietToRetrieval ?? false).toBe(false);
+    expect(parsedDefaults.projectContextOptimization?.maxChars ?? 48_000).toBe(48_000);
+
+    const validated = validateConfigObject({
+      agents: {
+        defaults: {
+          projectContextOptimization: {
+            dietToRetrieval: true,
+            maxChars: 44_000,
+          },
+        },
+      },
+    });
+    expect(validated).toMatchObject({
+      ok: true,
+      config: {
+        agents: {
+          defaults: {
+            projectContextOptimization: {
+              dietToRetrieval: true,
+              maxChars: 44_000,
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("accepts agents.defaults.historyOptimization", () => {
+    const defaults = AgentDefaultsSchema.parse({
+      historyOptimization: {
+        digestOldToolResults: true,
+        keepRawTurns: 4,
+        oldToolResultMaxChars: 1800,
+      },
+    })!;
+
+    expect(defaults.historyOptimization?.digestOldToolResults).toBe(true);
+    expect(defaults.historyOptimization?.keepRawTurns).toBe(4);
+    expect(defaults.historyOptimization?.oldToolResultMaxChars).toBe(1800);
+  });
+
+  it("round-trips historyOptimization and resolves default-off/defaults", () => {
+    const parsedDefaults = AgentDefaultsSchema.parse({})!;
+    expect(parsedDefaults.historyOptimization?.digestOldToolResults ?? false).toBe(false);
+    expect(parsedDefaults.historyOptimization?.keepRawTurns ?? 3).toBe(3);
+    expect(parsedDefaults.historyOptimization?.oldToolResultMaxChars ?? 2_000).toBe(2_000);
+
+    const validated = validateConfigObject({
+      agents: {
+        defaults: {
+          historyOptimization: {
+            digestOldToolResults: true,
+            keepRawTurns: 2,
+            oldToolResultMaxChars: 1600,
+          },
+        },
+      },
+    });
+    expect(validated).toMatchObject({
+      ok: true,
+      config: {
+        agents: {
+          defaults: {
+            historyOptimization: {
+              digestOldToolResults: true,
+              keepRawTurns: 2,
+              oldToolResultMaxChars: 1600,
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("enforces bounds for phase3 optimization fields", () => {
+    expect(() =>
+      AgentDefaultsSchema.parse({
+        projectContextOptimization: {
+          maxChars: 0,
+        },
+      }),
+    ).toThrow();
+
+    expect(() =>
+      AgentDefaultsSchema.parse({
+        historyOptimization: {
+          keepRawTurns: -1,
+        },
+      }),
+    ).toThrow();
+
+    expect(() =>
+      AgentDefaultsSchema.parse({
+        historyOptimization: {
+          oldToolResultMaxChars: 0,
+        },
+      }),
+    ).toThrow();
+  });
+
   it("accepts positive heartbeat timeoutSeconds on defaults and agent entries", () => {
     const defaults = AgentDefaultsSchema.parse({
       heartbeat: { timeoutSeconds: 45, skipWhenBusy: true },
