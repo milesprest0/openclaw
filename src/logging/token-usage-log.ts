@@ -66,8 +66,48 @@ export type TokenUsageRecord = {
   pctFull?: number;
 };
 
+export type PromptInstrumentationRecord = {
+  generatedAt: string;
+  sessionKey: string;
+  sessionId?: string;
+  model?: string;
+  provider?: string;
+  promptTokens?: number;
+  systemPrompt: {
+    chars: number;
+    projectContextChars: number;
+    nonProjectContextChars: number;
+  };
+  tools: {
+    schemaChars: number;
+  };
+  skills: {
+    promptChars: number;
+  };
+  injectedWorkspaceFiles: {
+    count: number;
+    injectedChars: number;
+  };
+  retrieval:
+    | {
+        available: false;
+      }
+    | {
+        available: true;
+        entries: unknown[];
+      };
+  qualityProxy: {
+    evalPassRate: null;
+    regret: null;
+  };
+};
+
 function tokenUsageLogEnabled(config?: OpenClawConfig | null): boolean {
   return config?.logging?.tokenUsageLog !== false;
+}
+
+function promptInstrumentationEnabled(config?: OpenClawConfig | null): boolean {
+  return config?.observability?.promptInstrumentation?.enabled === true;
 }
 
 /**
@@ -90,6 +130,29 @@ export async function logTokenUsageRecord(
     await appendFile(filePath, `${JSON.stringify(record)}\n`, "utf8");
   } catch (err) {
     logVerbose(`failed to append token usage record: ${String(err)}`);
+  }
+}
+
+/**
+ * Append a single prompt instrumentation record as one JSON line. Best-effort:
+ * never throws and never blocks turn handling.
+ */
+export async function logPromptInstrumentationRecord(
+  record: PromptInstrumentationRecord,
+  config?: OpenClawConfig | null,
+): Promise<void> {
+  if (!promptInstrumentationEnabled(config)) {
+    return;
+  }
+  if (!canUseNodeFs()) {
+    return;
+  }
+  try {
+    const filePath = resolveTokenUsageLogPath();
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await appendFile(filePath, `${JSON.stringify(record)}\n`, "utf8");
+  } catch (err) {
+    logVerbose(`failed to append prompt instrumentation record: ${String(err)}`);
   }
 }
 
