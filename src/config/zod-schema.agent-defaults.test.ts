@@ -202,6 +202,48 @@ describe("agent defaults schema", () => {
     expect(defaults.toolExposure?.lazy).toBe(true);
   });
 
+  it("accepts agents.defaults.skillsPromptOptimization", () => {
+    const defaults = AgentDefaultsSchema.parse({
+      skillsPromptOptimization: {
+        trimDescriptions: true,
+        maxDescriptionChars: 220,
+      },
+    })!;
+
+    expect(defaults.skillsPromptOptimization?.trimDescriptions).toBe(true);
+    expect(defaults.skillsPromptOptimization?.maxDescriptionChars).toBe(220);
+  });
+
+  it("round-trips skillsPromptOptimization and resolves default-off/default-160", () => {
+    const parsedDefaults = AgentDefaultsSchema.parse({})!;
+    expect(parsedDefaults.skillsPromptOptimization?.trimDescriptions ?? false).toBe(false);
+    expect(parsedDefaults.skillsPromptOptimization?.maxDescriptionChars ?? 160).toBe(160);
+
+    const validated = validateConfigObject({
+      agents: {
+        defaults: {
+          skillsPromptOptimization: {
+            trimDescriptions: true,
+            maxDescriptionChars: 180,
+          },
+        },
+      },
+    });
+    expect(validated).toMatchObject({
+      ok: true,
+      config: {
+        agents: {
+          defaults: {
+            skillsPromptOptimization: {
+              trimDescriptions: true,
+              maxDescriptionChars: 180,
+            },
+          },
+        },
+      },
+    });
+  });
+
   it("accepts positive heartbeat timeoutSeconds on defaults and agent entries", () => {
     const defaults = AgentDefaultsSchema.parse({
       heartbeat: { timeoutSeconds: 45, skipWhenBusy: true },

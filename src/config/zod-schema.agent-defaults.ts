@@ -258,6 +258,13 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    skillsPromptOptimization: z
+      .object({
+        trimDescriptions: z.boolean().optional(),
+        maxDescriptionChars: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
     embeddedPi: z
       .object({
         projectSettingsPolicy: z
