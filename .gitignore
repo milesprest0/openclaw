@@ -227,3 +227,7 @@ extensions/**/.openclaw-runtime-deps-stamp.json
 /.opengrep-out/
 /.crabbox-artifacts
 .comux*
+PLAN-context-rot.md
+PLAN-pathA-rca.md
+PLAN-summarization-race.md
+RCA-orchestration-leak.md
