@@ -11,6 +11,7 @@ import { emitAgentEvent } from "../infra/agent-events.js";
 import { createInlineCodeState } from "../markdown/code-spans.js";
 import { coerceChatContentText } from "../shared/chat-content.js";
 import {
+  isNonFinalAssistantMessage,
   parseAssistantTextSignature,
   resolveAssistantMessagePhase,
   type AssistantPhase,
@@ -37,8 +38,18 @@ import {
   promoteThinkingTagsToBlocks,
 } from "./pi-embedded-utils.js";
 
-function shouldSuppressAssistantVisibleOutput(message: AgentMessage | undefined): boolean {
-  return resolveAssistantMessagePhase(message) === "commentary";
+function shouldSuppressAssistantVisibleOutput(params: {
+  message: AgentMessage | undefined;
+  suppressNonFinalAssistantText: boolean;
+}): boolean {
+  const { message, suppressNonFinalAssistantText } = params;
+  if (resolveAssistantMessagePhase(message) === "commentary") {
+    return true;
+  }
+  if (!suppressNonFinalAssistantText) {
+    return false;
+  }
+  return isNonFinalAssistantMessage(message);
 }
 
 function isTranscriptOnlyOpenClawAssistantMessage(message: AgentMessage | undefined): boolean {
@@ -405,7 +416,10 @@ export function handleMessageUpdate(
   }
 
   ctx.noteLastAssistant(msg);
-  const suppressVisibleAssistantOutput = shouldSuppressAssistantVisibleOutput(msg);
+  const suppressVisibleAssistantOutput = shouldSuppressAssistantVisibleOutput({
+    message: msg,
+    suppressNonFinalAssistantText: ctx.state.suppressNonFinalAssistantText,
+  });
   if (suppressVisibleAssistantOutput) {
     return;
   }
@@ -494,6 +508,12 @@ export function handleMessageUpdate(
     !deliveryPhase &&
     Boolean(streamItemId) &&
     isOpenAiResponsesAssistantMessage(partialAssistant);
+  const shouldWithholdUnphasedAssistantStream =
+    ctx.state.suppressNonFinalAssistantText &&
+    !deliveryPhase &&
+    !isPhasePendingOpenAiResponsesTextItem &&
+    !isOpenAiResponsesAssistantMessage(partialAssistant) &&
+    Boolean(chunk);
   if ((deliveryPhase || isPhasePendingOpenAiResponsesTextItem) && streamItemId) {
     const previousStreamItemId = ctx.state.lastAssistantStreamItemId;
     if (previousStreamItemId && previousStreamItemId !== streamItemId) {
@@ -507,6 +527,9 @@ export function handleMessageUpdate(
     return;
   }
   if (isPhasePendingOpenAiResponsesTextItem) {
+    return;
+  }
+  if (shouldWithholdUnphasedAssistantStream) {
     return;
   }
   const phaseAwareVisibleText = coerceChatContentText(
@@ -661,7 +684,10 @@ export function handleMessageEnd(
 
   const assistantMessage = msg;
   const assistantPhase = resolveAssistantMessagePhase(assistantMessage);
-  const suppressVisibleAssistantOutput = shouldSuppressAssistantVisibleOutput(assistantMessage);
+  const suppressVisibleAssistantOutput = shouldSuppressAssistantVisibleOutput({
+    message: assistantMessage,
+    suppressNonFinalAssistantText: ctx.state.suppressNonFinalAssistantText,
+  });
   const suppressDeterministicApprovalOutput = shouldSuppressDeterministicApprovalOutput(ctx.state);
   ctx.noteLastAssistant(assistantMessage);
   ctx.recordAssistantUsage((assistantMessage as { usage?: unknown }).usage);

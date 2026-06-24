@@ -109,6 +109,49 @@ export function resolveAssistantEventPhase(data: unknown): AssistantPhase | unde
   );
 }
 
+function hasStructuredToolInvocationContent(content: unknown): boolean {
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some((block) => {
+    if (!block || typeof block !== "object") {
+      return false;
+    }
+    const record = block as Record<string, unknown>;
+    const type = typeof record.type === "string" ? record.type.trim() : "";
+    if (
+      type === "toolCall" ||
+      type === "toolUse" ||
+      type === "tool_call" ||
+      type === "tool_use" ||
+      type === "functionCall" ||
+      type === "function_call"
+    ) {
+      return true;
+    }
+    return Array.isArray(record.tool_calls) || Array.isArray(record.toolCalls);
+  });
+}
+
+export function isNonFinalAssistantMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const entry = message as {
+    content?: unknown;
+    stopReason?: unknown;
+    tool_calls?: unknown;
+    toolCalls?: unknown;
+  };
+  if (entry.stopReason === "toolUse") {
+    return true;
+  }
+  if (Array.isArray(entry.tool_calls) || Array.isArray(entry.toolCalls)) {
+    return true;
+  }
+  return hasStructuredToolInvocationContent(entry.content);
+}
+
 export function extractAssistantTextForPhase(
   message: unknown,
   options?: {
