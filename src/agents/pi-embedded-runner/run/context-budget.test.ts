@@ -6,12 +6,12 @@ import {
   resolveContextBudget,
 } from "./context-budget.js";
 
-function makeUserMessage(content: AgentMessage["content"]): AgentMessage {
+function makeUserMessage(content: string | unknown[]): AgentMessage {
   return {
     role: "user",
     content,
     timestamp: 0,
-  } as AgentMessage;
+  } as unknown as AgentMessage;
 }
 
 function makeAssistantMessage(text: string): AgentMessage {
@@ -19,7 +19,7 @@ function makeAssistantMessage(text: string): AgentMessage {
     role: "assistant",
     content: text,
     timestamp: 0,
-  } as AgentMessage;
+  } as unknown as AgentMessage;
 }
 
 describe("context budget guard", () => {
@@ -31,7 +31,7 @@ describe("context budget guard", () => {
         makeUserMessage([
           { type: "text", text: `turn-${i} ${hugeChunk}` },
           { type: "image", data: "x".repeat(8_000), mimeType: "image/png" },
-        ] as unknown as AgentMessage["content"]),
+        ] as unknown[]),
       );
       messages.push(makeAssistantMessage(`ack-${i}`));
     }
@@ -67,7 +67,7 @@ describe("context budget guard", () => {
         makeUserMessage([
           { type: "text", text: `image-${i}` },
           { type: "image", data: `img-${i}`, mimeType: "image/png" },
-        ] as unknown as AgentMessage["content"]),
+        ] as unknown[]),
       );
       messages.push(makeAssistantMessage(`ok-${i}`));
     }
@@ -227,7 +227,9 @@ describe("context budget guard", () => {
 
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.role).toBe("user");
-    expect(result.messages[0]?.content).toBe(messages[0]?.content);
+    expect((result.messages[0] as { content?: unknown })?.content).toBe(
+      (messages[0] as { content?: unknown })?.content,
+    );
     expect(result.droppedTurns).toBe(0);
   });
 
@@ -259,8 +261,10 @@ describe("context budget guard", () => {
     });
 
     const latestUser = result.messages.find((message) => message.role === "user");
-    expect(latestUser?.content).toBe(messages[4]?.content);
-    expect(result.messages.at(-1)?.content).toBe("current-ack");
+    expect((latestUser as { content?: unknown })?.content).toBe(
+      (messages[4] as { content?: unknown })?.content,
+    );
+    expect((result.messages.at(-1) as { content?: unknown })?.content).toBe("current-ack");
     expect(result.messages).not.toHaveLength(0);
   });
 

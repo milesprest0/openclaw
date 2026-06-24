@@ -5,7 +5,11 @@ const { logPromptInstrumentationRecordMock, logTokenUsageRecordMock, updateSessi
   vi.hoisted(() => ({
     logPromptInstrumentationRecordMock: vi.fn(async () => {}),
     logTokenUsageRecordMock: vi.fn(async () => {}),
-    updateSessionStoreEntryMock: vi.fn(async () => undefined),
+    updateSessionStoreEntryMock: vi.fn(
+      async (_params: {
+        update: (entry: SessionEntry) => Promise<Partial<SessionEntry>>;
+      }): Promise<unknown> => undefined,
+    ),
   }));
 
 vi.mock("../../logging/token-usage-log.js", async () => {

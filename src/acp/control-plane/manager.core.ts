@@ -605,7 +605,16 @@ export class AcpSessionManager {
           .filter(Boolean) as string[],
       );
       if (key === "thinking") {
-        return nextOptions;
+        const thinkingOptions = mergeRuntimeOptions({
+          current: resolveRuntimeOptionsFromMeta(meta),
+          patch: inferredPatch,
+        });
+        await this.persistRuntimeOptions({
+          cfg: params.cfg,
+          sessionKey,
+          options: thinkingOptions,
+        });
+        return thinkingOptions;
       }
       if (advertisedKeys.size > 0 && !advertisedKeys.has(key)) {
         throw new AcpRuntimeError(

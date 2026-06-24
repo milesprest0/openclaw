@@ -25,7 +25,7 @@ export class SocketAdapter {
     if (!isPromiseLike(requestOrStream)) {
       return requestOrStream;
     }
-    const wrapped = requestOrStream.catch((err) => {
+    const wrapped = requestOrStream.then(undefined, (err: unknown) => {
       throw SocketAdapter.normalizeError(err, responseStarted);
     });
     return wrapped as T;

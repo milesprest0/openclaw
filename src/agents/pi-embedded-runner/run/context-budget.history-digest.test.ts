@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { applyContextBudgetGuard } from "./context-budget.js";
 
 function makeUser(content: string): AgentMessage {
-  return { role: "user", content, timestamp: 0 } as AgentMessage;
+  return { role: "user", content, timestamp: 0 } as unknown as AgentMessage;
 }
 
 function makeAssistant(content: string): AgentMessage {
-  return { role: "assistant", content, timestamp: 0 } as AgentMessage;
+  return { role: "assistant", content, timestamp: 0 } as unknown as AgentMessage;
 }
 
 function makeToolResult(content: string, toolName = "read"): AgentMessage {
