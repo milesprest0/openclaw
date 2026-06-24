@@ -44,6 +44,7 @@ export type EmbeddedPiSubscribeState = {
   includeReasoning: boolean;
   shouldEmitPartialReplies: boolean;
   streamReasoning: boolean;
+  suppressNonFinalAssistantText: boolean;
 
   deltaBuffer: string;
   blockBuffer: string;
