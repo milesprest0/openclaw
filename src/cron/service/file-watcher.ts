@@ -26,8 +26,8 @@
 // ============================================================================
 
 import fs from "node:fs";
-import { ensureLoaded } from "./store.js";
 import type { CronServiceState } from "./state.js";
+import { ensureLoaded } from "./store.js";
 
 const DEFAULT_DEBOUNCE_MS = 250;
 const DEFAULT_MIN_SUPPRESS_MS = 100;
@@ -67,10 +67,7 @@ export function startCronStoreWatcher(
   const log = state.deps.log;
 
   if (!fs.existsSync(storePath)) {
-    log.info(
-      { storePath },
-      "cron: file watcher skipped (store path does not exist yet)",
-    );
+    log.info({ storePath }, "cron: file watcher skipped (store path does not exist yet)");
     return null;
   }
 
@@ -79,7 +76,9 @@ export function startCronStoreWatcher(
   let closed = false;
 
   const triggerReload = () => {
-    if (closed) return;
+    if (closed) {
+      return;
+    }
     debounceTimer = null;
     const nowMs = state.deps.nowMs();
     if (nowMs < suppressUntilMs) {
@@ -100,10 +99,7 @@ export function startCronStoreWatcher(
         }
       })
       .catch((err) => {
-        log.warn(
-          { storePath, err: String(err) },
-          "cron: hot-reload op-queue chain failed",
-        );
+        log.warn({ storePath, err: String(err) }, "cron: hot-reload op-queue chain failed");
       });
     state.op = reloadPromise;
   };
@@ -111,8 +107,12 @@ export function startCronStoreWatcher(
   let watcher: fs.FSWatcher | null = null;
   try {
     watcher = fs.watch(storePath, { persistent: false }, () => {
-      if (closed) return;
-      if (debounceTimer !== null) clearTimeout(debounceTimer);
+      if (closed) {
+        return;
+      }
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+      }
       debounceTimer = setTimeout(triggerReload, debounceMs);
     });
     // Don't keep the Node process alive just for the cron watcher.
@@ -120,10 +120,7 @@ export function startCronStoreWatcher(
       watcher.unref();
     }
   } catch (err) {
-    log.warn(
-      { storePath, err: String(err) },
-      "cron: fs.watch failed (hot-reload disabled)",
-    );
+    log.warn({ storePath, err: String(err) }, "cron: fs.watch failed (hot-reload disabled)");
     return null;
   }
 
@@ -134,20 +131,16 @@ export function startCronStoreWatcher(
   // on most platforms. For maximum robustness we also swallow any error
   // bubbled by the watcher itself.
   watcher.on("error", (err) => {
-    log.warn(
-      { storePath, err: String(err) },
-      "cron: fs.watch emitted error (continuing)",
-    );
+    log.warn({ storePath, err: String(err) }, "cron: fs.watch emitted error (continuing)");
   });
 
-  log.info(
-    { storePath, debounceMs },
-    "cron: file watcher started (hot-reload on external edits)",
-  );
+  log.info({ storePath, debounceMs }, "cron: file watcher started (hot-reload on external edits)");
 
   return {
     stop: () => {
-      if (closed) return;
+      if (closed) {
+        return;
+      }
       closed = true;
       if (debounceTimer !== null) {
         clearTimeout(debounceTimer);
@@ -161,13 +154,8 @@ export function startCronStoreWatcher(
     },
     suppressFor: (ms) => {
       const window =
-        typeof ms === "number" && ms >= DEFAULT_MIN_SUPPRESS_MS
-          ? ms
-          : DEFAULT_MIN_SUPPRESS_MS;
-      suppressUntilMs = Math.max(
-        suppressUntilMs,
-        state.deps.nowMs() + window,
-      );
+        typeof ms === "number" && ms >= DEFAULT_MIN_SUPPRESS_MS ? ms : DEFAULT_MIN_SUPPRESS_MS;
+      suppressUntilMs = Math.max(suppressUntilMs, state.deps.nowMs() + window);
     },
   };
 }

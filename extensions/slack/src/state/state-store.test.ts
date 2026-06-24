@@ -40,7 +40,9 @@ describe("InMemoryStateStore", () => {
     expect(await store.get("k")).toBeUndefined();
     // After pruning, it's really gone.
     const seen: string[] = [];
-    for await (const e of store.list()) seen.push(e.key);
+    for await (const e of store.list()) {
+      seen.push(e.key);
+    }
     expect(seen).not.toContain("k");
   });
 
@@ -91,7 +93,9 @@ describe("InMemoryStateStore", () => {
     vi.setSystemTime(Date.now() + 2000);
 
     const seen: Record<string, unknown> = {};
-    for await (const e of store.list("a/")) seen[e.key] = e.value;
+    for await (const e of store.list("a/")) {
+      seen[e.key] = e.value;
+    }
     expect(seen).toEqual({ "a/1": "one" });
   });
 
@@ -118,7 +122,9 @@ describe("InMemoryStateStore", () => {
       throw new Error("boom");
     });
     store.watch("k", (c) => {
-      if (c.kind !== "removed") good.push(c.key);
+      if (c.kind !== "removed") {
+        good.push(c.key);
+      }
     });
     await store.put("k", 1);
     expect(good).toEqual(["k"]);

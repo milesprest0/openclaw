@@ -15,7 +15,7 @@ function fixtureWorkspaceDir(): string {
 function loadFixtureContextFiles() {
   return fs
     .readdirSync(fixtureWorkspaceDir())
-    .sort((a, b) => a.localeCompare(b, "en"))
+    .toSorted((a, b) => a.localeCompare(b, "en"))
     .map((name) => ({
       path: name,
       content: fs.readFileSync(path.join(fixtureWorkspaceDir(), name), "utf-8"),

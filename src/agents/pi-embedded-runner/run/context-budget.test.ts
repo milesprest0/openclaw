@@ -299,13 +299,13 @@ describe("context budget guard", () => {
       });
 
       tokenEstimates.push(result.estimatedTokens);
-      const latestUser = result.messages.filter((message) => message.role === "user").at(-1);
+      const latestUser = result.messages.findLast((message) => message.role === "user");
       expect(latestUser?.content).toBe(
-        messages.filter((message) => message.role === "user").at(-1)?.content,
+        messages.findLast((message) => message.role === "user")?.content,
       );
     }
 
-    const sorted = [...tokenEstimates].sort((a, b) => a - b);
+    const sorted = [...tokenEstimates].toSorted((a, b) => a - b);
     const p99Index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.99) - 1);
     const p99 = sorted[p99Index] ?? 0;
     expect(p99).toBeLessThanOrEqual(32_000);

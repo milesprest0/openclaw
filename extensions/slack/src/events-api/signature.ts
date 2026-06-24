@@ -58,16 +58,18 @@ export type VerifySlackSignatureResult =
  * failure. Callers MUST return HTTP 401 on any failure and MUST NOT leak
  * the specific \`reason\` to clients — it's for logging only.
  */
-export function verifySlackSignature(
-  input: VerifySlackSignatureInput,
-): VerifySlackSignatureResult {
+export function verifySlackSignature(input: VerifySlackSignatureInput): VerifySlackSignatureResult {
   if (!input.signingSecret || input.signingSecret.length === 0) {
     return { ok: false, reason: "missing_signing_secret" };
   }
   const sigHeader = input.headers.signature;
-  if (!sigHeader) return { ok: false, reason: "missing_signature_header" };
+  if (!sigHeader) {
+    return { ok: false, reason: "missing_signature_header" };
+  }
   const tsHeader = input.headers.timestamp;
-  if (!tsHeader) return { ok: false, reason: "missing_timestamp_header" };
+  if (!tsHeader) {
+    return { ok: false, reason: "missing_timestamp_header" };
+  }
 
   const tsSeconds = Number.parseInt(tsHeader, 10);
   if (!Number.isFinite(tsSeconds) || tsSeconds <= 0) {
@@ -77,8 +79,12 @@ export function verifySlackSignature(
   const now = input.now ?? Date.now();
   const maxAge = input.maxAgeMs ?? SLACK_SIGNATURE_MAX_AGE_MS;
   const ageMs = now - tsSeconds * 1000;
-  if (ageMs > maxAge) return { ok: false, reason: "timestamp_too_old" };
-  if (ageMs < -maxAge) return { ok: false, reason: "timestamp_in_future" };
+  if (ageMs > maxAge) {
+    return { ok: false, reason: "timestamp_too_old" };
+  }
+  if (ageMs < -maxAge) {
+    return { ok: false, reason: "timestamp_in_future" };
+  }
 
   if (!sigHeader.startsWith("v0=")) {
     return { ok: false, reason: "invalid_signature_format" };
@@ -96,8 +102,12 @@ export function verifySlackSignature(
 
   const a = Buffer.from(expectedHex, "hex");
   const b = Buffer.from(providedHex.toLowerCase(), "hex");
-  if (a.length !== b.length) return { ok: false, reason: "signature_mismatch" };
-  if (!timingSafeEqual(a, b)) return { ok: false, reason: "signature_mismatch" };
+  if (a.length !== b.length) {
+    return { ok: false, reason: "signature_mismatch" };
+  }
+  if (!timingSafeEqual(a, b)) {
+    return { ok: false, reason: "signature_mismatch" };
+  }
 
   return { ok: true };
 }

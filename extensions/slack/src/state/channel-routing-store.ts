@@ -75,15 +75,9 @@ export type ChannelRoutingStoreOptions = {
 
 export interface ChannelRoutingStore {
   upsert(input: UpsertChannelRoutingInput): Promise<ChannelRoutingRecord>;
-  get(
-    workspaceId: string,
-    channelId: string,
-  ): Promise<ChannelRoutingRecord | undefined>;
+  get(workspaceId: string, channelId: string): Promise<ChannelRoutingRecord | undefined>;
   /** Returns the record only if \`enabled !== false\`. */
-  resolve(
-    workspaceId: string,
-    channelId: string,
-  ): Promise<ChannelRoutingRecord | undefined>;
+  resolve(workspaceId: string, channelId: string): Promise<ChannelRoutingRecord | undefined>;
   remove(workspaceId: string, channelId: string): Promise<void>;
 
   /**
@@ -95,9 +89,7 @@ export interface ChannelRoutingStore {
    * usable before this completes — \`get/resolve\` fall through to the
    * backing store on miss.
    */
-  hydrateAndWatch(opts?: {
-    workspaceId?: string;
-  }): Promise<{
+  hydrateAndWatch(opts?: { workspaceId?: string }): Promise<{
     loaded: number;
     listening: boolean;
     durationMs: number;
@@ -133,9 +125,7 @@ class ChannelRoutingStoreImpl implements ChannelRoutingStore {
       workspaceId: input.workspaceId,
       channelId: input.channelId,
       modelId: input.modelId,
-      fallbackModels: input.fallbackModels
-        ? [...input.fallbackModels]
-        : undefined,
+      fallbackModels: input.fallbackModels ? [...input.fallbackModels] : undefined,
       overrideReason: input.overrideReason,
       updatedBy: input.updatedBy,
       updatedAt: now,
@@ -146,25 +136,27 @@ class ChannelRoutingStoreImpl implements ChannelRoutingStore {
     return record;
   }
 
-  async get(
-    workspaceId: string,
-    channelId: string,
-  ): Promise<ChannelRoutingRecord | undefined> {
+  async get(workspaceId: string, channelId: string): Promise<ChannelRoutingRecord | undefined> {
     const key = routingKey(workspaceId, channelId);
     const hot = this.hotCache.get(key);
-    if (hot) return hot;
+    if (hot) {
+      return hot;
+    }
     const entry = await this.store.get<ChannelRoutingRecord>(key);
-    if (entry) this.hotCache.set(key, entry.value);
+    if (entry) {
+      this.hotCache.set(key, entry.value);
+    }
     return entry?.value;
   }
 
-  async resolve(
-    workspaceId: string,
-    channelId: string,
-  ): Promise<ChannelRoutingRecord | undefined> {
+  async resolve(workspaceId: string, channelId: string): Promise<ChannelRoutingRecord | undefined> {
     const rec = await this.get(workspaceId, channelId);
-    if (!rec) return undefined;
-    if (rec.enabled === false) return undefined;
+    if (!rec) {
+      return undefined;
+    }
+    if (rec.enabled === false) {
+      return undefined;
+    }
     return rec;
   }
 
@@ -174,9 +166,7 @@ class ChannelRoutingStoreImpl implements ChannelRoutingStore {
     await this.store.delete(key);
   }
 
-  async hydrateAndWatch(opts?: {
-    workspaceId?: string;
-  }): Promise<{
+  async hydrateAndWatch(opts?: { workspaceId?: string }): Promise<{
     loaded: number;
     listening: boolean;
     durationMs: number;
@@ -205,7 +195,9 @@ class ChannelRoutingStoreImpl implements ChannelRoutingStore {
         listening = true;
         this.activeUnsub = unsub;
       } catch (err) {
-        if (!(err instanceof StateStoreFeatureUnavailableError)) throw err;
+        if (!(err instanceof StateStoreFeatureUnavailableError)) {
+          throw err;
+        }
         // Swallow: underlying store does not support watch. Caller may
         // re-call hydrate periodically, or upgrade the factory later.
       }
@@ -219,16 +211,16 @@ class ChannelRoutingStoreImpl implements ChannelRoutingStore {
         try {
           unsub();
         } finally {
-          if (this.activeUnsub === unsub) this.activeUnsub = undefined;
+          if (this.activeUnsub === unsub) {
+            this.activeUnsub = undefined;
+          }
         }
       },
     };
   }
 }
 
-export function createChannelRoutingStore(
-  opts?: ChannelRoutingStoreOptions,
-): ChannelRoutingStore {
+export function createChannelRoutingStore(opts?: ChannelRoutingStoreOptions): ChannelRoutingStore {
   return new ChannelRoutingStoreImpl(opts);
 }
 
@@ -241,8 +233,6 @@ function assertKey(value: string, label: string): void {
     throw new TypeError(`channel routing: ${label} must be a non-empty string`);
   }
   if (value.includes("/")) {
-    throw new TypeError(
-      `channel routing: ${label} must not contain '/' (namespace delimiter)`,
-    );
+    throw new TypeError(`channel routing: ${label} must not contain '/' (namespace delimiter)`);
   }
 }

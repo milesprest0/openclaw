@@ -2419,6 +2419,10 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
             case "context.assembled":
               recordContextAssembled(evt, metadata);
               return;
+            case "context.gate.applied":
+            case "context.history.digested":
+            case "context.projectContext.dieted":
+              return;
             case "model.call.started":
               recordModelCallStarted(evt, metadata);
               return;

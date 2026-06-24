@@ -1794,7 +1794,7 @@ export async function dispatchReplyFromConfig(
       replies.length > 0
     ) {
       const reasoningFallback = [...replies]
-        .reverse()
+        .toReversed()
         .find((reply) => reply.isReasoning === true && (reply.text ?? "").trim().length > 0);
       if (reasoningFallback) {
         const promotedFinal: ReplyPayload = { ...reasoningFallback, isReasoning: false };

@@ -204,7 +204,7 @@ export async function* wrapAsyncIterableWithIdleDetection<T>(
         nextResult = await iterator.next();
       }
 
-      if ((nextResult as IdleSentinel).idleFallbackSentinel === true) {
+      if ((nextResult as IdleSentinel).idleFallbackSentinel) {
         // Idle deadline fired before any next event. Abort upstream and throw.
         try {
           await iterator.return?.();

@@ -19,7 +19,7 @@ function loadJsonlCases(filePath: string): InstructionFollowingEvalCase[] {
 
 function loadFixtureContextFiles(fixturePath: string): EmbeddedContextFile[] {
   const absoluteFixture = path.resolve(projectRoot(), fixturePath);
-  const names = fs.readdirSync(absoluteFixture).sort((a, b) => a.localeCompare(b, "en"));
+  const names = fs.readdirSync(absoluteFixture).toSorted((a, b) => a.localeCompare(b, "en"));
   return names.map((name) => ({
     path: name,
     content: fs.readFileSync(path.join(absoluteFixture, name), "utf-8"),

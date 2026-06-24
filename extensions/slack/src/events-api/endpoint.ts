@@ -20,14 +20,8 @@
  * See: memory/2026-05-08-track-beta-slack-resilience-plan.md
  */
 
-import {
-  createEventDedupStore,
-  type EventDedupStore,
-} from "../state/event-dedup-store.js";
-import {
-  verifySlackSignature,
-  type SlackSignatureHeaders,
-} from "./signature.js";
+import { createEventDedupStore, type EventDedupStore } from "../state/event-dedup-store.js";
+import { verifySlackSignature, type SlackSignatureHeaders } from "./signature.js";
 
 export const EVENTS_API_DEFAULT_PATH = "/slack/events";
 
@@ -84,15 +78,12 @@ type ParsedPayload =
 
 const DEFAULT_LOGGER: SlackEventsApiLogger = {
   info: (msg, meta) => {
-    // eslint-disable-next-line no-console
     console.log(`[slack.eventsApi] ${msg}`, meta ?? {});
   },
   warn: (msg, meta) => {
-    // eslint-disable-next-line no-console
     console.warn(`[slack.eventsApi] ${msg}`, meta ?? {});
   },
   error: (msg, meta) => {
-    // eslint-disable-next-line no-console
     console.error(`[slack.eventsApi] ${msg}`, meta ?? {});
   },
 };
@@ -208,15 +199,10 @@ function classifyPayload(payload: unknown): ParsedPayload {
     const eventId = typeof obj.event_id === "string" ? obj.event_id : "";
     const teamId = typeof obj.team_id === "string" ? obj.team_id : undefined;
     const event =
-      obj.event && typeof obj.event === "object"
-        ? (obj.event as Record<string, unknown>)
-        : {};
-    const eventType =
-      typeof event.type === "string" ? event.type : "unknown";
-    const channelId =
-      typeof event.channel === "string" ? event.channel : undefined;
-    const threadTs =
-      typeof event.thread_ts === "string" ? event.thread_ts : undefined;
+      obj.event && typeof obj.event === "object" ? (obj.event as Record<string, unknown>) : {};
+    const eventType = typeof event.type === "string" ? event.type : "unknown";
+    const channelId = typeof event.channel === "string" ? event.channel : undefined;
+    const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : undefined;
     if (eventId) {
       return {
         kind: "event_callback",
@@ -234,7 +220,11 @@ function classifyPayload(payload: unknown): ParsedPayload {
 }
 
 function asString(v: unknown): string | null {
-  if (typeof v === "string") return v;
-  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
+  if (typeof v === "string") {
+    return v;
+  }
+  if (Array.isArray(v) && typeof v[0] === "string") {
+    return v[0];
+  }
   return null;
 }
