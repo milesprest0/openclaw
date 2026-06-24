@@ -361,8 +361,8 @@ export function resolveContextBudget(params: {
     overrideKey: params.overrideKey,
   });
   const merged: AgentContextBudgetOverrideConfig = {
-    ...(configured ?? {}),
-    ...(override ?? {}),
+    ...configured,
+    ...override,
   };
 
   const enabled = merged.enabled ?? true;

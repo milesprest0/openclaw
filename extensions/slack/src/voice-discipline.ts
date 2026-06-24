@@ -57,7 +57,7 @@ const PROCESS_HEADER_PATTERNS: ReadonlyArray<RegExp> = [
   // Bare reasoning-narration lines that often precede the real reply.
   /^(?:I am now|I am going to|I am currently|I'll now|Let me now|Let me first|Let me start by|Let me determine|Let me figure out|I need to figure out|I need to determine|I'm going to|I will now|First, I'll|First, let me|Now I'll|Now let me)[^\n]*$/gim,
   // "Step N:" reasoning enumerations at start of line.
-  /^Step\s+\d+\s*[:.\-]\s+I[' ][^\n]*$/gim,
+  /^Step\s+\d+\s*[:.-]\s+I[' ][^\n]*$/gim,
 ];
 
 /**

@@ -20,31 +20,34 @@ function isLikelySocketDrop(err: unknown): boolean {
   return SOCKET_DROP_MESSAGE_RE.test(message);
 }
 
-export class SocketAdapter {
-  static attach<T>(requestOrStream: T, responseStarted: () => boolean): T {
-    if (!isPromiseLike(requestOrStream)) {
-      return requestOrStream;
-    }
-    const wrapped = requestOrStream.catch((err) => {
-      throw SocketAdapter.normalizeError(err, responseStarted);
-    });
-    return wrapped as T;
+function attach<T>(requestOrStream: T, responseStarted: () => boolean): T {
+  if (!isPromiseLike(requestOrStream)) {
+    return requestOrStream;
   }
-
-  static normalizeError(err: unknown, responseStarted: () => boolean): unknown {
-    if (err instanceof SocketDropException) {
-      return err;
-    }
-    if (!isLikelySocketDrop(err)) {
-      return err;
-    }
-    const phase = responseStarted() ? "mid-stream" : "before response";
-    return new SocketDropException(
-      `Socket dropped ${phase}: ${formatErrorMessage(err)}`,
-      !responseStarted(),
-      {
-        cause: err,
-      },
-    );
-  }
+  const wrapped = requestOrStream.then(undefined, (err: unknown) => {
+    throw normalizeError(err, responseStarted);
+  });
+  return wrapped as T;
 }
+
+function normalizeError(err: unknown, responseStarted: () => boolean): unknown {
+  if (err instanceof SocketDropException) {
+    return err;
+  }
+  if (!isLikelySocketDrop(err)) {
+    return err;
+  }
+  const phase = responseStarted() ? "mid-stream" : "before response";
+  return new SocketDropException(
+    `Socket dropped ${phase}: ${formatErrorMessage(err)}`,
+    !responseStarted(),
+    {
+      cause: err,
+    },
+  );
+}
+
+export const SocketAdapter = {
+  attach,
+  normalizeError,
+};

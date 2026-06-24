@@ -175,25 +175,21 @@ class ThreadParticipationStoreImpl implements ThreadParticipationStore {
   ): Promise<ThreadParticipationRecord | undefined> {
     const key = threadKey(workspaceId, channelId, threadTs);
     const hot = this.getHot(key);
-    if (hot) return hot;
+    if (hot) {
+      return hot;
+    }
     const fetched = await this.fetchFromStore(key);
-    if (fetched) this.writeHot(key, fetched);
+    if (fetched) {
+      this.writeHot(key, fetched);
+    }
     return fetched;
   }
 
-  async has(
-    workspaceId: string,
-    channelId: string,
-    threadTs: string,
-  ): Promise<boolean> {
+  async has(workspaceId: string, channelId: string, threadTs: string): Promise<boolean> {
     return (await this.get(workspaceId, channelId, threadTs)) !== undefined;
   }
 
-  async forget(
-    workspaceId: string,
-    channelId: string,
-    threadTs: string,
-  ): Promise<void> {
+  async forget(workspaceId: string, channelId: string, threadTs: string): Promise<void> {
     const key = threadKey(workspaceId, channelId, threadTs);
     this.hotCache.delete(key);
     await this.store.delete(key);
@@ -220,7 +216,9 @@ class ThreadParticipationStoreImpl implements ThreadParticipationStore {
 
   private getHot(key: string): ThreadParticipationRecord | undefined {
     const hit = this.hotCache.get(key);
-    if (!hit) return undefined;
+    if (!hit) {
+      return undefined;
+    }
     // Hot-cache respects TTL even though the underlying store also enforces
     // it — this keeps us honest when Firestore TTL sweeps lag.
     if (hit.lastActivityAt + this.ttlMs <= Date.now()) {
@@ -237,15 +235,15 @@ class ThreadParticipationStoreImpl implements ThreadParticipationStore {
     // Evict LRU if at capacity and inserting a new key.
     if (!this.hotCache.has(key) && this.hotCache.size >= this.hotCacheMax) {
       const first = this.hotCache.keys().next();
-      if (!first.done) this.hotCache.delete(first.value);
+      if (!first.done) {
+        this.hotCache.delete(first.value);
+      }
     }
     this.hotCache.delete(key);
     this.hotCache.set(key, record);
   }
 
-  private async fetchFromStore(
-    key: string,
-  ): Promise<ThreadParticipationRecord | undefined> {
+  private async fetchFromStore(key: string): Promise<ThreadParticipationRecord | undefined> {
     const entry = await this.store.get<ThreadParticipationRecord>(key);
     return entry?.value;
   }
@@ -262,11 +260,7 @@ export function createThreadParticipationStore(
   return new ThreadParticipationStoreImpl(opts);
 }
 
-function threadKey(
-  workspaceId: string,
-  channelId: string,
-  threadTs: string,
-): string {
+function threadKey(workspaceId: string, channelId: string, threadTs: string): string {
   return `${workspaceId}/${channelId}/${threadTs}`;
 }
 

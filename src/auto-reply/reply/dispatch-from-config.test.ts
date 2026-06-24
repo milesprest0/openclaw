@@ -4098,7 +4098,7 @@ describe("dispatchReplyFromConfig", () => {
       let call = 0;
       (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mockImplementation(() => {
         call += 1;
-        return call === 1 ? false : true;
+        return call !== 1;
       });
       const ctx = buildTestCtx({ Provider: "whatsapp" });
       const replyResolver = async () => ({ text: "the answer" }) satisfies ReplyPayload;

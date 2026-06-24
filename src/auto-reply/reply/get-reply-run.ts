@@ -37,7 +37,6 @@ import { HEARTBEAT_TRANSCRIPT_PROMPT } from "../heartbeat.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
 import {
   type ElevatedLevel,
-  formatThinkingLevels,
   isThinkingLevelSupported,
   normalizeThinkLevel,
   type ReasoningLevel,

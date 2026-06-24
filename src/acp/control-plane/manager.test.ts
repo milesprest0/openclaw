@@ -2985,10 +2985,13 @@ describe("AcpSessionManager", () => {
         value: "openai-codex/gpt-5.4",
       }),
     );
-    expect(runtimeState.setConfigOption).toHaveBeenCalledWith(
+    // `thinking` is intentionally bypassed in setConfigOption (commit 7207aa1aa2:
+    // "Safely bypasses 'thinking' mode configuration inside the ACP control plane block").
+    // It is applied via ensureSession's thinking param instead, so setConfigOption must
+    // never be invoked with key: "thinking".
+    expect(runtimeState.setConfigOption).not.toHaveBeenCalledWith(
       expect.objectContaining({
         key: "thinking",
-        value: "high",
       }),
     );
     expect(runtimeState.setConfigOption).toHaveBeenCalledWith(

@@ -82,14 +82,14 @@ export interface StateStore {
 
   get<V = unknown>(key: string): Promise<StateStoreEntry<V> | undefined>;
 
-  put<V = unknown>(key: string, value: V, opts?: StateStoreWriteOptions): Promise<void>;
+  put(key: string, value: unknown, opts?: StateStoreWriteOptions): Promise<void>;
 
   /**
    * Atomic "only write if absent". Returns true if the write happened, false
    * if a non-expired entry already existed. Used by the event-dedup store
    * (PRE-172) to detect first-seen events.
    */
-  putIfAbsent<V = unknown>(key: string, value: V, opts?: StateStoreWriteOptions): Promise<boolean>;
+  putIfAbsent(key: string, value: unknown, opts?: StateStoreWriteOptions): Promise<boolean>;
 
   delete(key: string): Promise<void>;
 
@@ -156,7 +156,9 @@ const inMemoryRegistry = new Map<string, InMemoryStateStore>();
 
 function getOrCreateInMemoryStore(namespace: string): InMemoryStateStore {
   const existing = inMemoryRegistry.get(namespace);
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
   const created = new InMemoryStateStore(namespace);
   inMemoryRegistry.set(namespace, created);
   return created;
@@ -176,7 +178,7 @@ export class InMemoryStateStore implements StateStore {
   private readonly map = new Map<string, { value: unknown; expiresAt?: number }>();
   private readonly watchers = new Set<{
     prefix: string;
-    cb: StateStoreWatchCallback<unknown>;
+    cb: StateStoreWatchCallback;
   }>();
 
   constructor(namespace: string) {
@@ -189,7 +191,9 @@ export class InMemoryStateStore implements StateStore {
 
   async get<V = unknown>(key: string): Promise<StateStoreEntry<V> | undefined> {
     const raw = this.map.get(key);
-    if (!raw) return undefined;
+    if (!raw) {
+      return undefined;
+    }
     if (this.isExpired(raw)) {
       this.map.delete(key);
       this.notify({ kind: "removed", key });
@@ -198,42 +202,40 @@ export class InMemoryStateStore implements StateStore {
     return { key, value: raw.value as V, expiresAt: raw.expiresAt };
   }
 
-  async put<V = unknown>(
-    key: string,
-    value: V,
-    opts?: StateStoreWriteOptions,
-  ): Promise<void> {
+  async put(key: string, value: unknown, opts?: StateStoreWriteOptions): Promise<void> {
     const expiresAt = resolveExpiresAt(opts);
     const had = this.map.has(key);
     this.map.set(key, { value, expiresAt });
     this.notify({
       kind: had ? "modified" : "added",
       key,
-      value: value as unknown,
+      value,
       expiresAt,
     });
   }
 
-  async putIfAbsent<V = unknown>(
-    key: string,
-    value: V,
-    opts?: StateStoreWriteOptions,
-  ): Promise<boolean> {
+  async putIfAbsent(key: string, value: unknown, opts?: StateStoreWriteOptions): Promise<boolean> {
     const existing = this.map.get(key);
-    if (existing && !this.isExpired(existing)) return false;
+    if (existing && !this.isExpired(existing)) {
+      return false;
+    }
     await this.put(key, value, opts);
     return true;
   }
 
   async delete(key: string): Promise<void> {
     const had = this.map.delete(key);
-    if (had) this.notify({ kind: "removed", key });
+    if (had) {
+      this.notify({ kind: "removed", key });
+    }
   }
 
   async *list<V = unknown>(prefix?: string): AsyncIterable<StateStoreEntry<V>> {
     const now = Date.now();
     for (const [key, raw] of this.map.entries()) {
-      if (prefix && !key.startsWith(prefix)) continue;
+      if (prefix && !key.startsWith(prefix)) {
+        continue;
+      }
       if (raw.expiresAt !== undefined && raw.expiresAt <= now) {
         this.map.delete(key);
         this.notify({ kind: "removed", key });
@@ -243,13 +245,10 @@ export class InMemoryStateStore implements StateStore {
     }
   }
 
-  watch<V = unknown>(
-    prefix: string,
-    cb: StateStoreWatchCallback<V>,
-  ): StateStoreUnsubscribe {
+  watch<V = unknown>(prefix: string, cb: StateStoreWatchCallback<V>): StateStoreUnsubscribe {
     const entry = {
       prefix,
-      cb: cb as StateStoreWatchCallback<unknown>,
+      cb: cb as StateStoreWatchCallback,
     };
     this.watchers.add(entry);
     return () => {
@@ -281,8 +280,12 @@ export class InMemoryStateStore implements StateStore {
 }
 
 function resolveExpiresAt(opts?: StateStoreWriteOptions): number | undefined {
-  if (!opts) return undefined;
-  if (opts.expiresAt !== undefined) return opts.expiresAt;
+  if (!opts) {
+    return undefined;
+  }
+  if (opts.expiresAt !== undefined) {
+    return opts.expiresAt;
+  }
   if (opts.ttlMs !== undefined && opts.ttlMs > 0) {
     return Date.now() + opts.ttlMs;
   }

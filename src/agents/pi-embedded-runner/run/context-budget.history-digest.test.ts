@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { applyContextBudgetGuard } from "./context-budget.js";
 
 function makeUser(content: string): AgentMessage {
-  return { role: "user", content, timestamp: 0 } as AgentMessage;
+  return { role: "user", content, timestamp: 0 } as unknown as AgentMessage;
 }
 
 function makeAssistant(content: string): AgentMessage {
-  return { role: "assistant", content, timestamp: 0 } as AgentMessage;
+  return { role: "assistant", content, timestamp: 0 } as unknown as AgentMessage;
 }
 
 function makeToolResult(content: string, toolName = "read"): AgentMessage {
@@ -98,7 +98,7 @@ describe("context-budget history digest", () => {
       contextWindowTokens: 500_000,
     });
 
-    const digestedText = toolText(result.messages[2] as AgentMessage);
+    const digestedText = toolText(result.messages[2]);
     expect(digestedText.length).toBeLessThan(rawOld.length);
     expect(digestedText).toContain("/var/tmp/reports/case-9931.log");
     expect(digestedText).toContain("CASE-848393");
@@ -143,8 +143,8 @@ describe("context-budget history digest", () => {
       contextWindowTokens: 500_000,
     });
 
-    expect(toolText(result.messages[1] as AgentMessage)).not.toBe(old);
-    expect(toolText(result.messages[3] as AgentMessage)).toBe(recentA);
-    expect(toolText(result.messages[5] as AgentMessage)).toBe(recentB);
+    expect(toolText(result.messages[1])).not.toBe(old);
+    expect(toolText(result.messages[3])).toBe(recentA);
+    expect(toolText(result.messages[5])).toBe(recentB);
   });
 });

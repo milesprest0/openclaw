@@ -18,7 +18,7 @@ describe("inbound-retention registry", () => {
     pinInboundMedia(["a", "b"], 60_000, now);
     expect(isInboundMediaPinned("a", now)).toBe(true);
     expect(isInboundMediaPinned("b", now + 59_000)).toBe(true);
-    expect(pinnedInboundIds(now).sort()).toEqual(["a", "b"]);
+    expect(pinnedInboundIds(now).toSorted()).toEqual(["a", "b"]);
   });
 
   it("drops a pin once its ttl elapses (abandoned media still ages out)", () => {

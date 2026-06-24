@@ -152,6 +152,9 @@ function createPreparedSlackMessage(params?: {
     ctx: {
       cfg: params?.cfg ?? {},
       runtime: {},
+      // dispatch.ts emits ingress audit logs (BUG-044, commit 60fc760756) via
+      // ctx.logger.info/warn; the mock ctx must provide a logger or dispatch throws.
+      logger: { info: vi.fn(), warn: vi.fn() },
       botToken: "xoxb-test",
       app: { client: { chat: { postMessage: postMessageMock } } },
       teamId: "T1",
