@@ -89,7 +89,14 @@ export function resolveAndApplyOutboundThreadId(
   const guardEnabled = isSlackSendAction && isSlackThreadBindGuardEnabled();
   const guard = guardEnabled ? resolveInboundTurnThreadId(context.toolContext) : {};
   const resolved = guardEnabled
-    ? guard.threadId
+    ? (guard.threadId ??
+      context.resolveAutoThreadId?.({
+        cfg: context.cfg,
+        accountId: context.accountId,
+        to: context.to,
+        toolContext: context.toolContext,
+        replyToId: readStringParam(actionParams, "replyTo"),
+      }))
     : context.resolveAutoThreadId?.({
         cfg: context.cfg,
         accountId: context.accountId,

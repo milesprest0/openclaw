@@ -1,5 +1,6 @@
 import { createCodingTools, createReadTool } from "@mariozechner/pi-coding-agent";
 import { HEARTBEAT_RESPONSE_TOOL_NAME } from "../auto-reply/heartbeat-tool-response.js";
+import type { ChannelThreadingToolContext } from "../channels/plugins/types.public.js";
 import type { ModelCompatConfig } from "../config/types.models.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
@@ -313,6 +314,8 @@ export function createOpenClawCodingTools(options?: {
   currentChannelId?: string;
   /** Current thread timestamp for auto-threading (Slack). */
   currentThreadTs?: string;
+  /** Inbound turn threading context (topic/reply/thread hints). */
+  turnThreadContext?: ChannelThreadingToolContext["turnThreadContext"];
   /** Current inbound message id for action fallbacks (e.g. Telegram react). */
   currentMessageId?: string | number;
   /** Group id for channel-level tool policy resolution. */
@@ -736,6 +739,7 @@ export function createOpenClawCodingTools(options?: {
           pluginToolDenylist,
           currentChannelId: options?.currentChannelId,
           currentThreadTs: options?.currentThreadTs,
+          turnThreadContext: options?.turnThreadContext,
           currentMessageId: options?.currentMessageId,
           modelProvider: options?.modelProvider,
           modelId: options?.modelId,

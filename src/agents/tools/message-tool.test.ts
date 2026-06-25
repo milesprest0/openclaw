@@ -2,7 +2,9 @@ import { Type } from "typebox";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelMessageCapability } from "../../channels/plugins/message-capabilities.js";
 import type { ChannelMessageActionName, ChannelPlugin } from "../../channels/plugins/types.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { MessageActionRunResult } from "../../infra/outbound/message-action-runner.js";
+import { resolveAndApplyOutboundThreadId } from "../../infra/outbound/message-action-threading.js";
 type CreateMessageTool = typeof import("./message-tool.js").createMessageTool;
 type CreateOpenClawTools = typeof import("../openclaw-tools.js").createOpenClawTools;
 type ResetPluginRuntimeStateForTest =
@@ -519,6 +521,213 @@ describe("message tool agent routing", () => {
     const call = mocks.runMessageAction.mock.calls[0]?.[0];
     expect(call?.toolContext?.currentThreadTs).toBe("111.222");
     expect(call?.toolContext?.replyToMode).toBe("all");
+  });
+
+  it("forwards turnThreadContext through createOpenClawTools to the message tool", async () => {
+    mockSendResult({ channel: "slack", to: "channel:C123" });
+
+    const tool = createOpenClawTools({
+      agentSessionKey: "agent:main:slack:channel:c123:thread:111.222",
+      config: {} as never,
+      agentChannel: "slack",
+      currentChannelId: "channel:C123",
+      turnThreadContext: {
+        topicId: "171.000",
+        replyToId: "171.111",
+        threadTs: "171.222",
+        isInboundThreadedTurn: true,
+      },
+    }).find((candidate) => candidate.name === "message");
+
+    if (!tool) {
+      throw new Error("message tool not found");
+    }
+
+    await tool.execute("1", {
+      action: "send",
+      channel: "slack",
+      target: "channel:C123",
+      message: "stay in thread",
+    });
+
+    const call = mocks.runMessageAction.mock.calls[0]?.[0];
+    expect(call?.toolContext?.turnThreadContext).toEqual({
+      topicId: "171.000",
+      replyToId: "171.111",
+      threadTs: "171.222",
+      isInboundThreadedTurn: true,
+    });
+  });
+});
+
+describe("message tool Slack thread-bind regression", () => {
+  const slackConfig = {
+    channels: {
+      slack: {
+        botToken: "xoxb-test",
+      },
+    },
+  } as OpenClawConfig;
+
+  function resolveThreadFromLastSendCall() {
+    const call = mocks.runMessageAction.mock.calls[0]?.[0];
+    if (!call) {
+      throw new Error("missing runMessageAction call");
+    }
+    const actionParams = { ...(call.params as Record<string, unknown>) };
+    const resolved = resolveAndApplyOutboundThreadId(actionParams, {
+      cfg: slackConfig,
+      channel: "slack",
+      action: "send",
+      to: typeof actionParams.target === "string" ? actionParams.target : "channel:C123",
+      toolContext: call.toolContext,
+      resolveAutoThreadId: ({ to, toolContext }) =>
+        to === "channel:C123" &&
+        toolContext?.currentChannelId === "channel:C123" &&
+        (toolContext?.replyToMode === "all" || toolContext?.replyToMode === "first")
+          ? toolContext.currentThreadTs
+          : undefined,
+    });
+    return { actionParams, resolved };
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("binds to turnThreadContext when inbound threaded context is present", async () => {
+    mockSendResult({ channel: "slack", to: "channel:C123" });
+    const tool = createMessageTool({
+      runMessageAction: mocks.runMessageAction as never,
+      currentChannelProvider: "slack",
+      currentChannelId: "channel:C123",
+      currentThreadTs: "171.333",
+      replyToMode: "all",
+      turnThreadContext: {
+        topicId: "171.000",
+        replyToId: "171.111",
+        threadTs: "171.222",
+        isInboundThreadedTurn: true,
+      },
+    });
+
+    await tool.execute("1", {
+      action: "send",
+      channel: "slack",
+      target: "channel:C123",
+      message: "stay in thread",
+    });
+
+    const { actionParams, resolved } = resolveThreadFromLastSendCall();
+    expect(resolved).toBe("171.000");
+    expect(actionParams.threadId).toBe("171.000");
+  });
+
+  it.each(["all", "first"] as const)(
+    "binds to currentThreadTs when turnThreadContext is absent (replyToMode=%s)",
+    async (replyToMode) => {
+      mockSendResult({ channel: "slack", to: "channel:C123" });
+      const tool = createMessageTool({
+        runMessageAction: mocks.runMessageAction as never,
+        currentChannelProvider: "slack",
+        currentChannelId: "channel:C123",
+        currentThreadTs: "171.333",
+        replyToMode,
+      });
+
+      await tool.execute("1", {
+        action: "send",
+        channel: "slack",
+        target: "channel:C123",
+        message: "stay in thread",
+      });
+
+      const { actionParams, resolved } = resolveThreadFromLastSendCall();
+      expect(resolved).toBe("171.333");
+      expect(actionParams.threadId).toBe("171.333");
+    },
+  );
+
+  it("keeps Slack send top-level when topLevel=true", async () => {
+    mockSendResult({ channel: "slack", to: "channel:C123" });
+    const tool = createMessageTool({
+      runMessageAction: mocks.runMessageAction as never,
+      currentChannelProvider: "slack",
+      currentChannelId: "channel:C123",
+      currentThreadTs: "171.333",
+      replyToMode: "all",
+      turnThreadContext: {
+        topicId: "171.000",
+        isInboundThreadedTurn: true,
+      },
+    });
+
+    await tool.execute("1", {
+      action: "send",
+      channel: "slack",
+      target: "channel:C123",
+      topLevel: true,
+      message: "post top-level",
+    });
+
+    const { actionParams, resolved } = resolveThreadFromLastSendCall();
+    expect(resolved).toBeUndefined();
+    expect(actionParams.threadId).toBeUndefined();
+    expect(actionParams.topLevel).toBeUndefined();
+  });
+
+  it("uses explicit threadId verbatim when provided", async () => {
+    mockSendResult({ channel: "slack", to: "channel:C123" });
+    const tool = createMessageTool({
+      runMessageAction: mocks.runMessageAction as never,
+      currentChannelProvider: "slack",
+      currentChannelId: "channel:C123",
+      currentThreadTs: "171.333",
+      replyToMode: "all",
+      turnThreadContext: {
+        topicId: "171.000",
+        isInboundThreadedTurn: true,
+      },
+    });
+
+    await tool.execute("1", {
+      action: "send",
+      channel: "slack",
+      target: "channel:C123",
+      threadId: "explicit-thread",
+      message: "cross-post",
+    });
+
+    const { actionParams, resolved } = resolveThreadFromLastSendCall();
+    expect(resolved).toBe("explicit-thread");
+    expect(actionParams.threadId).toBe("explicit-thread");
+  });
+
+  it("keeps fallback behavior when guard env flag is disabled", async () => {
+    vi.stubEnv("OPENCLAW_SLACK_AUTO_BIND_INBOUND_THREAD", "0");
+    mockSendResult({ channel: "slack", to: "channel:C123" });
+    const tool = createMessageTool({
+      runMessageAction: mocks.runMessageAction as never,
+      currentChannelProvider: "slack",
+      currentChannelId: "channel:C123",
+      currentThreadTs: "171.333",
+      replyToMode: "all",
+      turnThreadContext: {
+        topicId: "171.000",
+        isInboundThreadedTurn: true,
+      },
+    });
+
+    await tool.execute("1", {
+      action: "send",
+      channel: "slack",
+      target: "channel:C123",
+      message: "fallback thread",
+    });
+
+    const { actionParams, resolved } = resolveThreadFromLastSendCall();
+    expect(resolved).toBe("171.333");
+    expect(actionParams.threadId).toBe("171.333");
   });
 });
 

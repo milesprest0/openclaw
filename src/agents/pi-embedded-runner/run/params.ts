@@ -4,6 +4,7 @@ import type { SourceReplyDeliveryMode } from "../../../auto-reply/get-reply-opti
 import type { ReplyPayload } from "../../../auto-reply/reply-payload.js";
 import type { ReplyOperation } from "../../../auto-reply/reply/reply-run-registry.js";
 import type { ReasoningLevel, ThinkLevel, VerboseLevel } from "../../../auto-reply/thinking.js";
+import type { ChannelThreadingToolContext } from "../../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { PromptImageOrderEntry } from "../../../media/prompt-image-order.js";
 import type { CommandQueueEnqueueFn } from "../../../process/command-queue.types.js";
@@ -97,6 +98,8 @@ export type RunEmbeddedPiAgentParams = {
   currentChannelId?: string;
   /** Current thread timestamp for auto-threading (Slack). */
   currentThreadTs?: string;
+  /** Inbound turn threading context (topic/reply/thread hints). */
+  turnThreadContext?: ChannelThreadingToolContext["turnThreadContext"];
   /** Current inbound message id for action fallbacks (e.g. Telegram react). */
   currentMessageId?: string | number;
   /** Reply-to mode for Slack auto-threading. */
