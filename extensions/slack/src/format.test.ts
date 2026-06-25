@@ -66,6 +66,45 @@ describe("markdownToSlackMrkdwn", () => {
     expect(markdownToSlackMrkdwn(undefined as unknown as string)).toBe("");
   });
 
+  describe("stray tilde never renders as accidental strikethrough", () => {
+    const TILDE_OP = "\u223c";
+
+    it("neutralizes approximation tildes the model emits (the reported bug)", () => {
+      const input =
+        "Net profit is ~$250\u2013700K/yr; budget tiers ~$12K, ~$200K, ~$1M; margins ~85\u201388%.";
+      const out = markdownToSlackMrkdwn(input);
+      // No bare ASCII tilde survives in normal text, so Slack cannot pair them.
+      expect(out.includes("~")).toBe(false);
+      expect(out).toContain(`${TILDE_OP}$12K`);
+      expect(out).toContain(`${TILDE_OP}85`);
+      // Content is otherwise intact.
+      expect(out).toContain("Net profit is");
+      expect(out).toContain("$1M");
+    });
+
+    it("still renders intentional GFM strikethrough via Slack style markers", () => {
+      // Genuine strikethrough uses `~~...~~` in markdown and is emitted as a
+      // style marker, so it must remain a real single-tilde strikethrough span.
+      expect(markdownToSlackMrkdwn("~~gone~~")).toBe("~gone~");
+      expect(markdownToSlackMrkdwn("keep ~~this~~ and ~$5 too")).toBe(
+        `keep ~this~ and ${TILDE_OP}$5 too`,
+      );
+    });
+
+    it("preserves literal tildes inside inline code and code blocks", () => {
+      expect(markdownToSlackMrkdwn("run `cd ~/projects` now")).toBe("run `cd ~/projects` now");
+      expect(markdownToSlackMrkdwn("```\ncd ~/.openclaw; ls ~\n```")).toBe(
+        "```\ncd ~/.openclaw; ls ~\n```",
+      );
+    });
+
+    it("neutralizes tildes inside blockquotes too", () => {
+      const out = markdownToSlackMrkdwn("> roughly ~$300 per filing");
+      expect(out).toBe(`> roughly ${TILDE_OP}$300 per filing`);
+      expect(out.includes("~")).toBe(false);
+    });
+  });
+
   it("re-chunks on rendered length and still prefers word boundaries", () => {
     const chunks = markdownToSlackMrkdwnChunks("alpha <<", 8);
 
