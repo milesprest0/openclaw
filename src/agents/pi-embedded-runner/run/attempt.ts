@@ -905,6 +905,7 @@ export async function runEmbeddedAttempt(
             }),
             currentChannelId: params.currentChannelId,
             currentThreadTs: params.currentThreadTs,
+            turnThreadContext: params.turnThreadContext,
             currentMessageId: params.currentMessageId,
             includeCoreTools: toolConstructionPlan.includeCoreTools,
             toolConstructionPlan: toolConstructionPlan.codingToolConstructionPlan,

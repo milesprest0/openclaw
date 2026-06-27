@@ -203,29 +203,40 @@ describe("message action threading helpers", () => {
     expect(actionParams.threadId).toBe("171.000");
   });
 
-  it("keeps Slack send top-level for turns without inbound threaded context", () => {
-    const actionParams: Record<string, unknown> = {
-      channel: "slack",
-      target: "channel:C123",
-      message: "hi",
-    };
+  it.each(["all", "first"] as const)(
+    "falls back to auto-threading for Slack turns without inbound threaded context (replyToMode=%s)",
+    (replyToMode) => {
+      const actionParams: Record<string, unknown> = {
+        channel: "slack",
+        target: "channel:C123",
+        message: "hi",
+      };
 
-    const resolved = resolveAndApplyOutboundThreadId(actionParams, {
-      cfg: workspaceConfig,
-      channel: "slack",
-      action: "send",
-      to: "channel:C123",
-      toolContext: {
-        turnThreadContext: {
-          isInboundThreadedTurn: false,
+      const resolved = resolveAndApplyOutboundThreadId(actionParams, {
+        cfg: workspaceConfig,
+        channel: "slack",
+        action: "send",
+        to: "channel:C123",
+        toolContext: {
+          currentChannelId: "channel:C123",
+          currentThreadTs: "171.333",
+          replyToMode,
+          turnThreadContext: {
+            isInboundThreadedTurn: false,
+          },
         },
-      },
-      resolveAutoThreadId: () => "plugin-thread",
-    });
+        resolveAutoThreadId: ({ to, toolContext }) =>
+          to === "channel:C123" &&
+          toolContext?.currentChannelId === "channel:C123" &&
+          (toolContext?.replyToMode === "all" || toolContext?.replyToMode === "first")
+            ? toolContext.currentThreadTs
+            : undefined,
+      });
 
-    expect(resolved).toBeUndefined();
-    expect(actionParams.threadId).toBeUndefined();
-  });
+      expect(resolved).toBe("171.333");
+      expect(actionParams.threadId).toBe("171.333");
+    },
+  );
 
   it("honors explicit threadId for Slack cross-post sends", () => {
     const actionParams: Record<string, unknown> = {
@@ -294,16 +305,19 @@ describe("message action threading helpers", () => {
       action: "send",
       to: "channel:C123",
       toolContext: {
+        currentChannelId: "channel:C123",
+        currentThreadTs: "171.444",
+        replyToMode: "all",
         turnThreadContext: {
           topicId: "171.000",
           isInboundThreadedTurn: true,
         },
       },
-      resolveAutoThreadId: () => "plugin-thread",
+      resolveAutoThreadId: ({ toolContext }) => toolContext?.currentThreadTs,
     });
 
-    expect(resolved).toBe("plugin-thread");
-    expect(actionParams.threadId).toBe("plugin-thread");
+    expect(resolved).toBe("171.444");
+    expect(actionParams.threadId).toBe("171.444");
   });
 
   it("inherits currentMessageId for same-target sends when replyToMode=all", () => {

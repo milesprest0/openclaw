@@ -9,7 +9,10 @@ import {
 } from "../../channels/plugins/message-action-discovery.js";
 import { CHANNEL_MESSAGE_ACTION_NAMES } from "../../channels/plugins/message-action-names.js";
 import type { ChannelMessageCapability } from "../../channels/plugins/message-capabilities.js";
-import type { ChannelMessageActionName } from "../../channels/plugins/types.public.js";
+import type {
+  ChannelMessageActionName,
+  ChannelThreadingToolContext,
+} from "../../channels/plugins/types.public.js";
 import { resolveCommandSecretRefsViaGateway } from "../../cli/command-secret-gateway.js";
 import { getScopedChannelsCommandSecretTargets } from "../../cli/command-secret-targets.js";
 import { resolveMessageSecretScope } from "../../cli/message-secret-scope.js";
@@ -410,6 +413,7 @@ type MessageToolOptions = {
   currentChannelId?: string;
   currentChannelProvider?: string;
   currentThreadTs?: string;
+  turnThreadContext?: ChannelThreadingToolContext["turnThreadContext"];
   agentThreadId?: string | number;
   currentMessageId?: string | number;
   replyToMode?: "off" | "first" | "all" | "batched";
@@ -738,6 +742,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         options?.currentChannelId ||
         options?.currentChannelProvider ||
         currentThreadTs ||
+        options?.turnThreadContext ||
         hasCurrentMessageId ||
         replyToMode ||
         options?.hasRepliedRef
@@ -745,6 +750,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
               currentChannelId: options?.currentChannelId,
               currentChannelProvider: options?.currentChannelProvider,
               currentThreadTs,
+              turnThreadContext: options?.turnThreadContext,
               currentMessageId: options?.currentMessageId,
               replyToMode,
               hasRepliedRef: options?.hasRepliedRef,
