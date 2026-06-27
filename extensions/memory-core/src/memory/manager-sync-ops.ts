@@ -36,6 +36,7 @@ import {
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import {
   createEmbeddingProvider,
+  isMemoryEmbeddingDimensionMismatchError,
   type EmbeddingProvider,
   type EmbeddingProviderId,
   type EmbeddingProviderRuntime,
@@ -187,6 +188,7 @@ export abstract class MemoryManagerSyncOps {
     { lastSize: number; pendingBytes: number; pendingMessages: number }
   >();
   protected vectorDegradedWriteWarningShown = false;
+  protected pinnedVectorDims?: number;
   private lastMetaSerialized: string | null = null;
 
   protected abstract readonly cache: { enabled: boolean; maxEntries?: number };
@@ -991,6 +993,7 @@ export abstract class MemoryManagerSyncOps {
     }
     const vectorReady = await this.ensureVectorReady();
     const meta = this.readMeta();
+    this.pinnedVectorDims = meta?.vectorDims;
     const configuredSources = resolveConfiguredSourcesForMeta(this.sources);
     const configuredScopeHash = resolveConfiguredScopeHash({
       workspaceDir: this.workspaceDir,
@@ -1091,11 +1094,39 @@ export abstract class MemoryManagerSyncOps {
       const activated =
         this.shouldFallbackOnError(reason) && (await this.activateFallbackProvider(reason));
       if (activated) {
-        await this.runSafeReindex({
-          reason: params?.reason ?? "fallback",
-          force: true,
-          progress: progress ?? undefined,
-        });
+        try {
+          await this.runSafeReindex({
+            reason: params?.reason ?? "fallback",
+            force: true,
+            progress: progress ?? undefined,
+          });
+        } catch (fallbackErr) {
+          if (isMemoryEmbeddingDimensionMismatchError(fallbackErr)) {
+            log.error(
+              "memory embeddings: fallback vectors rejected due to store dimension mismatch; keeping previous index",
+              {
+                provider: this.provider?.id,
+                model: this.provider?.model,
+                fallbackFrom: this.fallbackFrom,
+                reason: formatErrorMessage(fallbackErr),
+              },
+            );
+            return;
+          }
+          throw fallbackErr;
+        }
+        return;
+      }
+      if (isMemoryEmbeddingDimensionMismatchError(err)) {
+        log.error(
+          "memory embeddings: vectors rejected due to store dimension mismatch; index unchanged",
+          {
+            provider: this.provider?.id,
+            model: this.provider?.model,
+            fallbackFrom: this.fallbackFrom,
+            reason,
+          },
+        );
         return;
       }
       throw err;
@@ -1200,6 +1231,7 @@ export abstract class MemoryManagerSyncOps {
       this.vector.available = originalDbClosed ? null : originalState.vectorAvailable;
       this.vector.loadError = originalState.vectorLoadError;
       this.vector.dims = originalState.vectorDims;
+      this.pinnedVectorDims = originalState.vectorDims;
       this.vectorDegradedWriteWarningShown = originalState.vectorDegradedWriteWarningShown;
       this.vectorReady = originalDbClosed ? null : originalState.vectorReady;
     };
@@ -1276,6 +1308,7 @@ export abstract class MemoryManagerSyncOps {
       this.resetVectorState();
       this.ensureSchema();
       this.vector.dims = nextMeta?.vectorDims;
+      this.pinnedVectorDims = nextMeta?.vectorDims;
     } catch (err) {
       try {
         closeMemoryDatabase(this.db);

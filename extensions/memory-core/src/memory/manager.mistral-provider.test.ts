@@ -45,14 +45,22 @@ function createProvider(id: string): EmbeddingProvider {
 
 function createSettings(params: {
   provider: "openai" | "mistral";
-  fallback?: "none" | "mistral" | "ollama" | "lmstudio";
+  fallback?: "none" | "openai" | "mistral" | "ollama" | "lmstudio";
+  model?: string;
+  outputDimensionality?: number;
+  fallbackModel?: string;
+  fallbackOutputDimensionality?: number;
 }): ResolvedMemorySearchConfig {
   return {
     provider: params.provider,
-    model: params.provider === "mistral" ? "mistral/mistral-embed" : "text-embedding-3-small",
+    model:
+      params.model ??
+      (params.provider === "mistral" ? "mistral/mistral-embed" : "text-embedding-3-small"),
     fallback: params.fallback ?? "none",
     remote: undefined,
-    outputDimensionality: undefined,
+    outputDimensionality: params.outputDimensionality,
+    fallbackModel: params.fallbackModel,
+    fallbackOutputDimensionality: params.fallbackOutputDimensionality,
     local: undefined,
   } as unknown as ResolvedMemorySearchConfig;
 }
@@ -133,6 +141,78 @@ describe("memory manager mistral provider wiring", () => {
     expect(fallbackRequest.provider).toBe("ollama");
     expect(fallbackRequest.model).toBe(DEFAULT_OLLAMA_EMBEDDING_MODEL);
     expect(fallbackRequest.fallback).toBe("none");
+  });
+
+  it("uses explicit fallbackModel instead of fallback adapter defaultModel", () => {
+    const request = resolveMemoryFallbackProviderRequest({
+      cfg: {} as OpenClawConfig,
+      settings: createSettings({
+        provider: "openai",
+        fallback: "ollama",
+        fallbackModel: "text-embedding-3-large",
+      }),
+      currentProviderId: "openai",
+    });
+
+    const fallbackRequest = expectMemoryFallbackRequest(request);
+    expect(fallbackRequest.provider).toBe("ollama");
+    expect(fallbackRequest.model).toBe("text-embedding-3-large");
+  });
+
+  it("uses fallbackOutputDimensionality for fallback requests", () => {
+    const request = resolveMemoryFallbackProviderRequest({
+      cfg: {} as OpenClawConfig,
+      settings: createSettings({
+        provider: "openai",
+        fallback: "mistral",
+        outputDimensionality: 1536,
+        fallbackOutputDimensionality: 3072,
+      }),
+      currentProviderId: "openai",
+    });
+
+    const fallbackRequest = expectMemoryFallbackRequest(request);
+    expect(fallbackRequest.outputDimensionality).toBe(3072);
+  });
+
+  it("allows same-provider fallback only when fallbackModel is configured", () => {
+    const allowed = resolveMemoryFallbackProviderRequest({
+      cfg: {} as OpenClawConfig,
+      settings: createSettings({
+        provider: "openai",
+        fallback: "openai",
+        fallbackModel: "text-embedding-3-large",
+      }),
+      currentProviderId: "openai",
+    });
+    expect(allowed).not.toBeNull();
+
+    const blocked = resolveMemoryFallbackProviderRequest({
+      cfg: {} as OpenClawConfig,
+      settings: createSettings({
+        provider: "openai",
+        fallback: "openai",
+      }),
+      currentProviderId: "openai",
+    });
+    expect(blocked).toBeNull();
+  });
+
+  it("keeps fallback request behavior unchanged when new fields are unset", () => {
+    const request = resolveMemoryFallbackProviderRequest({
+      cfg: {} as OpenClawConfig,
+      settings: createSettings({
+        provider: "openai",
+        fallback: "ollama",
+        model: "models/gemini-embedding-2-preview",
+        outputDimensionality: 3072,
+      }),
+      currentProviderId: "openai",
+    });
+
+    const fallbackRequest = expectMemoryFallbackRequest(request);
+    expect(fallbackRequest.model).toBe(DEFAULT_OLLAMA_EMBEDDING_MODEL);
+    expect(fallbackRequest.outputDimensionality).toBe(3072);
   });
 
   it("includes outputDimensionality in the primary provider request", () => {

@@ -15,6 +15,9 @@ export type EmbeddingProviderRequest = string;
 type EmbeddingProviderFallback = string;
 export type EmbeddingProviderRuntime = MemoryEmbeddingProviderRuntime;
 
+export const MEMORY_EMBEDDING_DIMENSION_MISMATCH_ERROR_NAME =
+  "MemoryEmbeddingDimensionMismatchError";
+
 export type EmbeddingProviderResult = {
   provider: EmbeddingProvider | null;
   requestedProvider: EmbeddingProviderRequest;
@@ -84,6 +87,47 @@ export function resolveEmbeddingProviderFallbackModel(
 ): string {
   const adapter = getMemoryEmbeddingProvider(providerId, config);
   return adapter?.defaultModel ?? fallbackSourceModel;
+}
+
+export function resolveEmbeddingDimensionMismatch(params: {
+  vectorDims?: number;
+  embeddings: number[][];
+}): { expected: number; actual: number; index: number } | null {
+  const expected = params.vectorDims;
+  if (typeof expected !== "number" || expected <= 0) {
+    return null;
+  }
+  for (let index = 0; index < params.embeddings.length; index++) {
+    const embedding = params.embeddings[index];
+    if (embedding && embedding.length > 0 && embedding.length !== expected) {
+      return {
+        expected,
+        actual: embedding.length,
+        index,
+      };
+    }
+  }
+  return null;
+}
+
+export function createMemoryEmbeddingDimensionMismatchError(params: {
+  expected: number;
+  actual: number;
+  index: number;
+}): Error {
+  const error = new Error(
+    `memory embeddings dimension mismatch (expected ${params.expected}, got ${params.actual}, index ${params.index})`,
+  );
+  error.name = MEMORY_EMBEDDING_DIMENSION_MISMATCH_ERROR_NAME;
+  return error;
+}
+
+export function isMemoryEmbeddingDimensionMismatchError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err.name === MEMORY_EMBEDDING_DIMENSION_MISMATCH_ERROR_NAME ||
+      /memory embeddings dimension mismatch/i.test(err.message))
+  );
 }
 
 async function createWithAdapter(

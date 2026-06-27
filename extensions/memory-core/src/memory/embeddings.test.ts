@@ -1,7 +1,12 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import type { MemoryEmbeddingProviderAdapter } from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEmbeddingProvider } from "./embeddings.js";
+import {
+  createEmbeddingProvider,
+  createMemoryEmbeddingDimensionMismatchError,
+  isMemoryEmbeddingDimensionMismatchError,
+  resolveEmbeddingDimensionMismatch,
+} from "./embeddings.js";
 
 const mockEmbeddingRegistry = vi.hoisted(() => ({
   adapters: [] as MemoryEmbeddingProviderAdapter[],
@@ -125,5 +130,29 @@ describe("createEmbeddingProvider", () => {
 
     expect(result.provider?.id).toBe("openai");
     expect(result.requestedProvider).toBe("auto");
+  });
+});
+
+describe("embedding dimension mismatch helpers", () => {
+  it("detects embedding dimension mismatch against pinned vector dims", () => {
+    expect(
+      resolveEmbeddingDimensionMismatch({
+        vectorDims: 4,
+        embeddings: [
+          [1, 2, 3, 4],
+          [1, 2, 3],
+        ],
+      }),
+    ).toEqual({ expected: 4, actual: 3, index: 1 });
+  });
+
+  it("marks dimension mismatch errors with a stable guard", () => {
+    const err = createMemoryEmbeddingDimensionMismatchError({
+      expected: 3072,
+      actual: 1536,
+      index: 0,
+    });
+    expect(isMemoryEmbeddingDimensionMismatchError(err)).toBe(true);
+    expect(isMemoryEmbeddingDimensionMismatchError(new Error("other"))).toBe(false);
   });
 });

@@ -1,60 +1,56 @@
-# Context Budget Invariant Implementation Summary
+# Dimension-Safe Fallback Implementation Summary
 
-## Files changed and purpose
+## Files changed
 
-- `src/agents/pi-embedded-runner/run/context-budget.ts`
-  - Added deterministic per-turn context-budget resolver + guard.
-  - Enforces: age out oldest inline images beyond cap, then drop oldest turns until under budget.
-  - Added per-tenant override support via `overrideKey` + `overrides`.
-- `src/agents/pi-embedded-runner/run/context-budget.test.ts`
-  - Regression tests for 3.5M-token/100-image trimming, image placeholder behavior, and default/override resolution.
-- `src/agents/pi-embedded-runner/run/attempt.ts`
-  - Applied guard before prompt submission/model call on every turn.
-- `src/agents/pi-embedded-runner/compact.ts`
-  - Applied guard before compaction so compaction input is bounded.
-- `src/agents/pi-embedded-runner/run/history-image-prune.ts`
-  - Re-exported `applyContextBudgetGuard` for existing run-path imports.
-- `src/auto-reply/reply/agent-runner-memory.ts`
-  - Wired context-budget likelihood check into preflight compaction trigger and passed `agentAccountId` through to compaction.
-- `src/auto-reply/reply/agent-runner-memory.test.ts`
-  - Adjusted two assertions to assert stable session identity (`sessionId`) instead of object reference.
-- `src/config/types.agent-defaults.ts`
-  - Extended `agents.defaults.contextBudget` shape with `overrideKey` and `overrides` map support.
-- `src/config/zod-schema.agent-defaults.ts`
-  - Added schema support for `agents.defaults.contextBudget.overrideKey` and `.overrides`.
-- `src/config/zod-schema.agent-defaults.test.ts`
-  - Added schema coverage for tenant override map under `agents.defaults.contextBudget`.
-- `src/config/schema.labels.ts`
-  - Added UI labels for new `contextBudget` keys.
+- `src/config/types.tools.ts`
+  - Added optional `memorySearch.fallbackModel` and `memorySearch.fallbackOutputDimensionality`.
+- `src/config/zod-schema.agent-runtime.ts`
+  - Added schema support for `fallbackModel` and `fallbackOutputDimensionality`.
 - `src/config/schema.help.ts`
-  - Added help text for new `contextBudget` keys.
-- `src/agents/openai-transport-stream.ts`
-  - Cast tightened to `as unknown as Array<Record<string, unknown>>` to satisfy current build lane type constraints.
-- `src/cron/service.test-harness.ts`
-  - Added `fileWatcher: null` to mock `CronServiceState` shape.
+  - Added help text for both new memory-search fallback fields.
+- `src/config/schema.labels.ts`
+  - Added UI labels for both new memory-search fallback fields.
+- `src/agents/memory-search.ts`
+  - Extended `ResolvedMemorySearchConfig` with `fallbackModel` and `fallbackOutputDimensionality`.
+  - Merge/default behavior now resolves:
+    - `fallbackModel` from defaults/overrides.
+    - `fallbackOutputDimensionality` from explicit fallback value, else primary `outputDimensionality`.
+- `extensions/memory-core/src/memory/manager-provider-state.ts`
+  - Fallback request now prefers `settings.fallbackModel` over adapter default model.
+  - Fallback request now uses `settings.fallbackOutputDimensionality ?? settings.outputDimensionality`.
+  - Same-provider fallback is now allowed only when `fallbackModel` is explicitly set; otherwise unchanged no-op behavior.
+- `extensions/memory-core/src/memory/embeddings.ts`
+  - Added reusable embedding-dimension mismatch helpers and mismatch error classifier.
+- `extensions/memory-core/src/memory/manager-embedding-ops.ts`
+  - Added dimension guard before persistence path; throws mismatch error before any writes when pinned/vector dims do not match.
+- `extensions/memory-core/src/memory/manager-sync-ops.ts`
+  - Added pinned-vector-dimension tracking through reindex paths.
+  - Added graceful handling for dimension mismatch errors (log, keep existing index, no crash).
+- `extensions/memory-core/src/memory/manager.mistral-provider.test.ts`
+  - Added/extended fallback resolver specs for model, dimensionality, same-provider rules, and back-compat.
+- `extensions/memory-core/src/memory/index.test.ts`
+  - Added integration spec that verifies mismatch fallback vectors are rejected without corrupting writes or crashing sync.
+- `extensions/memory-core/src/memory/embeddings.test.ts`
+  - Added helper-level mismatch detection/classifier tests.
+- `docs/.generated/config-baseline.sha256`
+  - Regenerated config-surface baseline hash for the two new optional `memorySearch` fields (`pnpm config:docs:gen`); `pnpm config:docs:check` is green.
 
-## Chosen default and rationale
+## New required tests added
 
-- Default `maxAssembledTokens` is derived as `floor(0.6 * contextWindowTokens)`.
-- If unset, this keeps the assembled transcript comfortably below model limits while preserving substantial history.
-- With the common 200k context window, this resolves to 120k assembled tokens.
-- Default `reserveTokens` is 20k; default `perThreadMaxImages` is 8.
+- `uses explicit fallbackModel instead of fallback adapter defaultModel`
+- `uses fallbackOutputDimensionality for fallback requests`
+- `allows same-provider fallback only when fallbackModel is configured`
+- `rejects fallback embeddings that do not match pinned vector dimensions without crashing`
+- `keeps fallback request behavior unchanged when new fields are unset`
 
-## Fleet override mechanism
-
-- Global default lives at `agents.defaults.contextBudget`.
-- Per-tenant overrides live in `agents.defaults.contextBudget.overrides`.
-- Runtime resolves override key in order: explicit `overrideKey`, then `agentAccountId`.
-- Effective budget = base defaults merged with selected override entry.
-
-## Verification commands and output tails
+## Verification run log tails
 
 ### Build
 
 Command:
 
 ```bash
-npm run build
+pnpm build
 ```
 
 Tail:
@@ -65,18 +61,62 @@ Tail:
 [build-all] write-cli-compat
 ```
 
-### Tests
+### Typecheck
 
-Command:
+Commands (touched lanes: core prod, extension prod, extension test):
 
 ```bash
-npx vitest run src/auto-reply/reply/agent-runner-memory.test.ts src/agents/pi-embedded-runner/run/context-budget.test.ts src/config/zod-schema.agent-defaults.test.ts
+pnpm tsgo:core
+pnpm tsgo:extensions
+pnpm tsgo:extensions:test
+```
+
+Result: all three lanes exited clean with zero diagnostics.
+
+### Config-surface baseline
+
+Commands:
+
+```bash
+pnpm config:docs:gen
+pnpm config:docs:check
 ```
 
 Tail:
 
 ```text
-Test Files  3 passed (3)
-Tests      39 passed (39)
-Duration   5.67s
+OK docs/.generated/config-baseline.sha256
+```
+
+### Lint / format (touched files)
+
+Commands:
+
+```bash
+pnpm exec oxfmt --check --threads=1 <touched files>
+node scripts/run-oxlint.mjs --tsconfig config/tsconfig/oxlint.extensions.json <touched extension files>
+node scripts/run-oxlint.mjs --tsconfig config/tsconfig/oxlint.core.json <touched core files>
+```
+
+Tail:
+
+```text
+All matched files use the correct format.
+Found 0 warnings and 0 errors.
+```
+
+### Memory-core tests
+
+Command:
+
+```bash
+pnpm test "extensions/memory-core/src/memory"
+```
+
+Tail:
+
+```text
+Test Files  35 passed (35)
+Tests      317 passed (317)
+[test] passed 1 Vitest shard in 9.30s
 ```

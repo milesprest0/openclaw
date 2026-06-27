@@ -30,17 +30,48 @@ let embedBatchCalls = 0;
 let embedBatchInputCalls = 0;
 let providerCalls: Array<{ provider?: string; model?: string; outputDimensionality?: number }> = [];
 let forceNoProvider = false;
+let failEmbeddingForModel: string | null = null;
 
 vi.mock("./embeddings.js", () => {
-  const embedText = (text: string) => {
+  const resolveModelDims = (model: string) => (model.includes("fallback-3d") ? 3 : 4);
+  const embedText = (text: string, dims = 4) => {
     const lower = text.toLowerCase();
     const alpha = lower.split("alpha").length - 1;
     const beta = lower.split("beta").length - 1;
     const image = lower.split("image").length - 1;
     const audio = lower.split("audio").length - 1;
-    return [alpha, beta, image, audio];
+    return [alpha, beta, image, audio].slice(0, dims);
   };
   return {
+    createMemoryEmbeddingDimensionMismatchError: (params: {
+      expected: number;
+      actual: number;
+      index: number;
+    }) => {
+      const error = new Error(
+        `memory embeddings dimension mismatch (expected ${params.expected}, got ${params.actual}, index ${params.index})`,
+      );
+      error.name = "MemoryEmbeddingDimensionMismatchError";
+      return error;
+    },
+    isMemoryEmbeddingDimensionMismatchError: (err: unknown) =>
+      err instanceof Error && err.name === "MemoryEmbeddingDimensionMismatchError",
+    resolveEmbeddingDimensionMismatch: (params: {
+      vectorDims?: number;
+      embeddings: number[][];
+    }) => {
+      const expected = params.vectorDims;
+      if (typeof expected !== "number" || expected <= 0) {
+        return null;
+      }
+      for (let index = 0; index < params.embeddings.length; index++) {
+        const embedding = params.embeddings[index];
+        if (embedding && embedding.length > 0 && embedding.length !== expected) {
+          return { expected, actual: embedding.length, index };
+        }
+      }
+      return null;
+    },
     createEmbeddingProvider: async (options: {
       provider?: string;
       model?: string;
@@ -60,15 +91,20 @@ vi.mock("./embeddings.js", () => {
       }
       const providerId = options.provider === "gemini" ? "gemini" : "mock";
       const model = options.model ?? "mock-embed";
+      const modelDims = resolveModelDims(model);
       return {
         requestedProvider: options.provider ?? "openai",
         provider: {
           id: providerId,
           model,
-          embedQuery: async (text: string) => embedText(text),
+          embedQuery: async (text: string) => embedText(text, modelDims),
           embedBatch: async (texts: string[]) => {
+            if (failEmbeddingForModel === model) {
+              failEmbeddingForModel = null;
+              throw new Error(`forced embedding failure for ${model}`);
+            }
             embedBatchCalls += 1;
-            return texts.map(embedText);
+            return texts.map((text) => embedText(text, modelDims));
           },
           ...(providerId === "gemini"
             ? {
@@ -95,7 +131,7 @@ vi.mock("./embeddings.js", () => {
                     if (mimeType?.startsWith("audio/")) {
                       return [0, 0, 0, 1];
                     }
-                    return embedText(input.text);
+                    return embedText(input.text, modelDims);
                   });
                 },
               }
@@ -191,6 +227,7 @@ describe("memory index", () => {
     embedBatchInputCalls = 0;
     providerCalls = [];
     forceNoProvider = false;
+    failEmbeddingForModel = null;
 
     rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(memoryDir, { recursive: true });
@@ -230,6 +267,8 @@ describe("memory index", () => {
     sources?: Array<"memory" | "sessions">;
     sessionMemory?: boolean;
     provider?: "openai" | "gemini";
+    fallback?: string;
+    fallbackModel?: string;
     model?: string;
     outputDimensionality?: number;
     multimodal?: {
@@ -249,6 +288,8 @@ describe("memory index", () => {
           workspace: workspaceDir,
           memorySearch: {
             provider: params.provider ?? "openai",
+            fallback: params.fallback,
+            fallbackModel: params.fallbackModel,
             model: params.model ?? "mock-embed",
             outputDimensionality: params.outputDimensionality,
             store: { path: params.storePath, vector: { enabled: params.vectorEnabled ?? false } },
@@ -352,6 +393,58 @@ describe("memory index", () => {
           }),
         ]),
       );
+    } finally {
+      await manager.close?.();
+    }
+  });
+
+  it("rejects fallback embeddings that do not match pinned vector dimensions without crashing", async () => {
+    vi.stubEnv("OPENCLAW_TEST_MEMORY_UNSAFE_REINDEX", "0");
+    const cfg = createCfg({
+      storePath: indexVectorPath,
+      vectorEnabled: true,
+      provider: "openai",
+      model: "primary-4d",
+      fallback: "openai",
+      fallbackModel: "fallback-3d",
+      outputDimensionality: 4,
+      hybrid: { enabled: true, vectorWeight: 0.5, textWeight: 0.5 },
+    });
+    const manager = await getFreshManager(cfg);
+    try {
+      await manager.sync({ reason: "test" });
+      const db = (
+        manager as unknown as {
+          db: {
+            prepare: (sql: string) => {
+              get: () => { c?: number; text?: string; model?: string } | undefined;
+            };
+          };
+        }
+      ).db;
+      const before =
+        db.prepare("SELECT COUNT(*) as c FROM chunks WHERE source = 'memory'").get()?.c ?? 0;
+      expect(before).toBeGreaterThan(0);
+
+      await fs.writeFile(
+        path.join(memoryDir, "2026-01-12.md"),
+        "# Log\nAlpha changed after fallback dimension mismatch.",
+      );
+      failEmbeddingForModel = "primary-4d";
+
+      await expect(manager.sync({ reason: "test" })).resolves.toBeUndefined();
+
+      const after =
+        db.prepare("SELECT COUNT(*) as c FROM chunks WHERE source = 'memory'").get()?.c ?? 0;
+      expect(after).toBe(before);
+      const latest =
+        db
+          .prepare(
+            "SELECT text, model FROM chunks WHERE source = 'memory' ORDER BY updated_at DESC LIMIT 1",
+          )
+          .get() ?? {};
+      expect(latest.text ?? "").not.toContain("Alpha changed after fallback dimension mismatch");
+      expect(latest.model ?? "").not.toBe("fallback-3d");
     } finally {
       await manager.close?.();
     }
