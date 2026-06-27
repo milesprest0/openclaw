@@ -443,6 +443,9 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.memorySearch.documentInputType": "Memory Search Document Input Type",
   "agents.defaults.memorySearch.outputDimensionality": "Memory Search Output Dimensionality",
   "agents.defaults.memorySearch.fallback": "Memory Search Fallback",
+  "agents.defaults.memorySearch.fallbackModel": "Memory Search Fallback Model",
+  "agents.defaults.memorySearch.fallbackOutputDimensionality":
+    "Memory Search Fallback Output Dimensionality",
   "agents.defaults.memorySearch.local.modelPath": "Local Embedding Model Path",
   "agents.defaults.memorySearch.local.contextSize": "Local Embedding Context Size",
   "agents.defaults.memorySearch.store.path": "Memory Search Index Path",

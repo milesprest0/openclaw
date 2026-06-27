@@ -89,22 +89,24 @@ export function resolveMemoryFallbackProviderRequest(params: {
   local: ResolvedMemorySearchConfig["local"];
 } | null {
   const fallback = params.settings.fallback;
-  if (
-    !fallback ||
-    fallback === "none" ||
-    !params.currentProviderId ||
-    fallback === params.currentProviderId
-  ) {
+  if (!fallback || fallback === "none" || !params.currentProviderId) {
+    return null;
+  }
+  const fallbackModel = params.settings.fallbackModel?.trim() || undefined;
+  if (fallback === params.currentProviderId && !fallbackModel) {
     return null;
   }
   return {
     provider: fallback,
-    model: resolveEmbeddingProviderFallbackModel(fallback, params.settings.model, params.cfg),
+    model:
+      fallbackModel ??
+      resolveEmbeddingProviderFallbackModel(fallback, params.settings.model, params.cfg),
     remote: params.settings.remote,
     inputType: params.settings.inputType,
     queryInputType: params.settings.queryInputType,
     documentInputType: params.settings.documentInputType,
-    outputDimensionality: params.settings.outputDimensionality,
+    outputDimensionality:
+      params.settings.fallbackOutputDimensionality ?? params.settings.outputDimensionality,
     fallback: "none",
     local: params.settings.local,
   };

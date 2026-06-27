@@ -36,11 +36,13 @@ export type ResolvedMemorySearchConfig = {
     sessionMemory: boolean;
   };
   fallback: string;
+  fallbackModel?: string;
   model: string;
   inputType?: string;
   queryInputType?: string;
   documentInputType?: string;
   outputDimensionality?: number;
+  fallbackOutputDimensionality?: number;
   local: {
     modelPath?: string;
     modelCacheDir?: string;
@@ -184,6 +186,8 @@ function mergeConfig(
   const defaultRemote = defaults?.remote;
   const overrideRemote = overrides?.remote;
   const fallback = overrides?.fallback ?? defaults?.fallback ?? "none";
+  const fallbackModel =
+    overrides?.fallbackModel?.trim() || defaults?.fallbackModel?.trim() || undefined;
   const fallbackAdapter =
     fallback && fallback !== "none"
       ? getConfiguredMemoryEmbeddingProvider(fallback, cfg)
@@ -233,6 +237,10 @@ function mergeConfig(
   const documentInputType =
     overrides?.documentInputType?.trim() || defaults?.documentInputType?.trim() || undefined;
   const outputDimensionality = overrides?.outputDimensionality ?? defaults?.outputDimensionality;
+  const fallbackOutputDimensionality =
+    overrides?.fallbackOutputDimensionality ??
+    defaults?.fallbackOutputDimensionality ??
+    outputDimensionality;
   const local = {
     modelPath: overrides?.local?.modelPath ?? defaults?.local?.modelPath,
     modelCacheDir: overrides?.local?.modelCacheDir ?? defaults?.local?.modelCacheDir,
@@ -344,11 +352,13 @@ function mergeConfig(
       sessionMemory,
     },
     fallback,
+    fallbackModel,
     model,
     inputType,
     queryInputType,
     documentInputType,
     outputDimensionality,
+    fallbackOutputDimensionality,
     local,
     store,
     chunking: { tokens: Math.max(1, chunking.tokens), overlap },

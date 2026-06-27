@@ -695,11 +695,13 @@ export const MemorySearchSchema = z
       .strict()
       .optional(),
     fallback: z.string().optional(),
+    fallbackModel: z.string().min(1).optional(),
     model: z.string().optional(),
     inputType: z.string().min(1).optional(),
     queryInputType: z.string().min(1).optional(),
     documentInputType: z.string().min(1).optional(),
     outputDimensionality: z.number().int().positive().optional(),
+    fallbackOutputDimensionality: z.number().int().positive().optional(),
     local: z
       .object({
         modelPath: z.string().optional(),

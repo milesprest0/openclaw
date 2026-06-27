@@ -393,6 +393,8 @@ export type MemorySearchConfig = {
   };
   /** Fallback memory embedding provider adapter id when embeddings fail. */
   fallback?: string;
+  /** Optional explicit fallback model id; overrides the fallback adapter default model. */
+  fallbackModel?: string;
   /** Embedding model id (remote) or alias (local). */
   model?: string;
   /** Optional provider-specific embedding input_type for query and document requests. */
@@ -406,6 +408,8 @@ export type MemorySearchConfig = {
    * Supported values today are 768, 1536, and 3072.
    */
   outputDimensionality?: number;
+  /** Optional fallback embedding output dimensions; defaults to outputDimensionality when unset. */
+  fallbackOutputDimensionality?: number;
   /** Local embedding settings (node-llama-cpp). */
   local?: {
     /** GGUF model path or hf: URI. */

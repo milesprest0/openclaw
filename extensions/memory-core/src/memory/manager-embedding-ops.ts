@@ -16,6 +16,10 @@ import {
   type MemorySource,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import {
+  createMemoryEmbeddingDimensionMismatchError,
+  resolveEmbeddingDimensionMismatch,
+} from "./embeddings.js";
+import {
   MEMORY_BATCH_FAILURE_LIMIT,
   recordMemoryBatchFailure,
   resetMemoryBatchFailureState,
@@ -724,6 +728,17 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
       throw err;
     }
     const sample = embeddings.find((embedding) => embedding.length > 0);
+    const mismatch = resolveEmbeddingDimensionMismatch({
+      vectorDims: this.pinnedVectorDims ?? this.vector.dims,
+      embeddings,
+    });
+    if (mismatch) {
+      throw createMemoryEmbeddingDimensionMismatchError({
+        expected: mismatch.expected,
+        actual: mismatch.actual,
+        index: mismatch.index,
+      });
+    }
     const vectorReady = sample ? await this.ensureVectorReady(sample.length) : false;
     this.writeChunks(entry, options.source, this.provider.model, chunks, embeddings, vectorReady);
   }
