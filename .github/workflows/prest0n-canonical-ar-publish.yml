@@ -1,0 +1,158 @@
+# Prest0n canonical artifact publish → private Artifact Registry (npm)
+#
+# Publishes the fork build as the SCOPED package `@prest0n/openclaw` to the
+# private AR npm repo so every Prest0n tenant VM installs one uniform,
+# version-pinned artifact (replacing `npm install -g openclaw` from public npm).
+#
+# Auth: keyless GitHub OIDC -> Workload Identity Federation (NO long-lived key).
+# This workflow is INERT until the owner-gated WIF pool + provider + the
+# dedicated publisher SA binding exist (see repo/infra notes). Until then it
+# only runs on manual dispatch and will fail fast at the auth step by design.
+#
+# Scope discipline: this does NOT touch the upstream public-npm release path
+# (openclaw-npm-release.yml). Different package name (@prest0n/openclaw vs
+# openclaw), different registry (AR vs npmjs), different trigger (v*-canonical*).
+name: prest0n-canonical-ar-publish
+
+on:
+  push:
+    tags:
+      - "v*-canonical*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref/SHA to build and publish from"
+        required: true
+        type: string
+      canonical_version:
+        description: "Version to publish, e.g. 2026.5.6-canonical.1"
+        required: true
+        type: string
+      dry_run:
+        description: "Build + pack + auth only; skip the actual publish"
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: prest0n-canonical-ar-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # required for keyless WIF/OIDC
+
+env:
+  AR_LOCATION: us-central1
+  AR_PROJECT: tensile-tenure-453409-k3
+  AR_REPO: openclaw-npm
+  PKG_SCOPE: "@prest0n"
+  PKG_NAME: "@prest0n/openclaw"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (resolved ref)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve build provenance
+        id: prov
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          SHORT="$(git rev-parse --short HEAD)"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "short=$SHORT" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ inputs.canonical_version }}" ]; then
+            echo "version=${{ inputs.canonical_version }}" >> "$GITHUB_OUTPUT"
+          else
+            BASE="$(node -p "require('./package.json').version")"
+            echo "version=${BASE}-canonical.${SHORT}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install build deps
+        run: |
+          set -euo pipefail
+          corepack enable || true
+          if [ -f pnpm-lock.yaml ]; then
+            corepack prepare pnpm@latest --activate || true
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: Build dist
+        run: node scripts/build-all.mjs
+
+      - name: Pack (uses files[] allow-list; no lifecycle scripts)
+        id: pack
+        run: |
+          set -euo pipefail
+          mkdir -p _stage
+          TGZ="$(npm pack --ignore-scripts --pack-destination _stage | tail -1)"
+          echo "tgz=_stage/${TGZ}" >> "$GITHUB_OUTPUT"
+
+      - name: Rescope tarball -> @prest0n/openclaw + pin version/provenance
+        id: rescope
+        run: |
+          set -euo pipefail
+          cd _stage
+          tar xzf "$(basename '${{ steps.pack.outputs.tgz }}')"
+          node -e '
+            const fs = require("fs");
+            const p = require("./package/package.json");
+            p.name = process.env.PKG_NAME;
+            p.version = "${{ steps.prov.outputs.version }}";
+            p.publishConfig = { [process.env.PKG_SCOPE + ":registry"]:
+              `https://${process.env.AR_LOCATION}-npm.pkg.dev/${process.env.AR_PROJECT}/${process.env.AR_REPO}/` };
+            p._canonicalProvenance = {
+              forkHead: "${{ steps.prov.outputs.head_sha }}",
+              builtFrom: "github-actions",
+              workflow: "prest0n-canonical-ar-publish",
+              runId: "${{ github.run_id }}",
+            };
+            fs.writeFileSync("./package/package.json", JSON.stringify(p, null, 2) + "\n");
+            console.log("rescoped:", p.name, p.version);
+          '
+          NEW="$(npm pack ./package --ignore-scripts | tail -1)"
+          echo "tgz=_stage/${NEW}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud (keyless WIF/OIDC)
+        # INERT until owner provisions the WIF pool/provider + binds the
+        # dedicated publisher SA. Replace the two secrets below once created.
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: tensile-tenure-453409-k3
+          workload_identity_provider: ${{ secrets.PREST0N_WIF_PROVIDER }}
+          service_account: ${{ secrets.PREST0N_AR_PUBLISHER_SA }}
+
+      - name: Configure AR npm auth (short-lived OAuth token)
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud auth print-access-token)"
+          REG="//${AR_LOCATION}-npm.pkg.dev/${AR_PROJECT}/${AR_REPO}/"
+          {
+            echo "${PKG_SCOPE}:registry=https:${REG}"
+            echo "${REG}:_authToken=${TOKEN}"
+            echo "${REG}:always-auth=true"
+          } > _stage/.npmrc
+
+      - name: Publish to Artifact Registry
+        if: ${{ inputs.dry_run != true }}
+        working-directory: _stage
+        run: npm publish "$(basename '${{ steps.rescope.outputs.tgz }}')" --userconfig .npmrc --ignore-scripts
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "DRY RUN — would publish ${PKG_NAME}@${{ steps.prov.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "from fork ${{ steps.prov.outputs.short }} to ${AR_LOCATION}/${AR_REPO}" >> "$GITHUB_STEP_SUMMARY"
