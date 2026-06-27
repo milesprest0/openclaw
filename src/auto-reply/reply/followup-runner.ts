@@ -365,6 +365,7 @@ export function createFollowupRunner(params: {
       const usage = runResult.meta?.agentMeta?.usage;
       const promptTokens = runResult.meta?.agentMeta?.promptTokens;
       const modelUsed = runResult.meta?.agentMeta?.model ?? fallbackModel ?? defaultModel;
+      const servedModelUsed = runResult.meta?.agentMeta?.servedModel;
       const providerUsed =
         runResult.meta?.agentMeta?.provider ?? fallbackProvider ?? queued.run.provider;
       const contextTokensUsed =
@@ -386,6 +387,7 @@ export function createFollowupRunner(params: {
           lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
           promptTokens,
           modelUsed,
+          servedModelUsed,
           providerUsed,
           contextTokensUsed,
           systemPromptReport: runResult.meta?.systemPromptReport,

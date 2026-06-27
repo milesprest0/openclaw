@@ -25,6 +25,15 @@ type MemoryPluginLike = MemoryPluginStatus;
 type SessionsRecentLike = SessionStatus;
 type EventLoopHealthLike = NonNullable<HealthSummary["eventLoop"]>;
 
+function formatSessionModelLabel(session: SessionsRecentLike): string {
+  const requestedModel = session.model ?? "unknown";
+  const servedModel = session.servedModel ?? null;
+  if (!servedModel || servedModel === requestedModel) {
+    return requestedModel;
+  }
+  return `served: ${servedModel} (requested: ${requestedModel})`;
+}
+
 export type StatusMemoryStateResolvers = {
   resolveMemoryVectorState: (value: NonNullable<MemoryStatusSnapshot["vector"]>) => {
     state: string;
@@ -336,7 +345,7 @@ export function buildStatusSessionsRows(params: {
     Key: params.shortenText(sess.key, 32),
     Kind: sess.kind,
     Age: sess.updatedAt && sess.age != null ? params.formatTimeAgo(sess.age) : "no activity",
-    Model: sess.model ?? "unknown",
+    Model: formatSessionModelLabel(sess),
     Runtime: sess.runtime ?? "unknown",
     Tokens: params.formatTokensCompact(sess),
     ...(params.verbose

@@ -724,6 +724,61 @@ describe("openai transport stream", () => {
     });
   });
 
+  it("captures servedModel from chunks while keeping model as requested", async () => {
+    const model = {
+      id: "google/gemini-3.5-flash",
+      name: "Gemini 3.5 Flash",
+      api: "openai-completions",
+      provider: "openrouter",
+      baseUrl: "http://localhost:8000/v1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 4096,
+    } satisfies Model<"openai-completions">;
+    const output = {
+      role: "assistant" as const,
+      content: [],
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    };
+    const stream: { push(event: unknown): void } = { push() {} };
+
+    async function* mockStream() {
+      yield {
+        id: "chatcmpl-proxy",
+        object: "chat.completion.chunk" as const,
+        created: 1775425651,
+        model: "anthropic/claude-4.8-opus-20260528",
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant" as const, content: "ok" },
+            logprobs: null,
+            finish_reason: "stop" as const,
+          },
+        ],
+      };
+    }
+
+    await __testing.processOpenAICompletionsStream(mockStream(), output, model, stream);
+
+    expect(output.model).toBe("google/gemini-3.5-flash");
+    expect(output.servedModel).toBe("anthropic/claude-4.8-opus-20260528");
+  });
+
   it("skips null and non-object OpenAI-compatible stream chunks", async () => {
     const model = {
       id: "glm-5",

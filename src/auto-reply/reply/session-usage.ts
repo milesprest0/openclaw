@@ -133,6 +133,7 @@ export async function persistSessionUsageUpdate(params: {
    */
   lastCallUsage?: NormalizedUsage;
   modelUsed?: string;
+  servedModelUsed?: string;
   providerUsed?: string;
   contextTokensUsed?: number;
   promptTokens?: number;
@@ -187,6 +188,7 @@ export async function persistSessionUsageUpdate(params: {
           const patch: Partial<SessionEntry> = {
             modelProvider: params.providerUsed ?? entry.modelProvider,
             model: params.modelUsed ?? entry.model,
+            servedModel: params.servedModelUsed ?? params.modelUsed ?? entry.model,
             contextTokens: resolvedContextTokens,
             systemPromptReport: params.systemPromptReport ?? entry.systemPromptReport,
             updatedAt: Date.now(),
@@ -265,6 +267,7 @@ export async function persistSessionUsageUpdate(params: {
           const patch: Partial<SessionEntry> = {
             modelProvider: params.providerUsed ?? entry.modelProvider,
             model: params.modelUsed ?? entry.model,
+            servedModel: params.servedModelUsed ?? params.modelUsed ?? entry.model,
             contextTokens: params.contextTokensUsed ?? entry.contextTokens,
             systemPromptReport: params.systemPromptReport ?? entry.systemPromptReport,
             updatedAt: Date.now(),

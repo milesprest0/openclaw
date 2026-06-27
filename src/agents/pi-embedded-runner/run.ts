@@ -2336,6 +2336,7 @@ export async function runEmbeddedPiAgent(
             sessionFile: sessionFileUsed,
             provider: reportedModelRef.provider,
             model: reportedModelRef.model,
+            ...(reportedModelRef.servedModel ? { servedModel: reportedModelRef.servedModel } : {}),
             contextTokens: ctxInfo.tokens,
             agentHarnessId: attempt.agentHarnessId,
             usage: usageMeta.usage,

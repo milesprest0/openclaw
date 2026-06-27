@@ -1377,6 +1377,7 @@ export async function runReplyAgent(params: {
     const usage = runResult.meta?.agentMeta?.usage;
     const promptTokens = runResult.meta?.agentMeta?.promptTokens;
     const modelUsed = runResult.meta?.agentMeta?.model ?? fallbackModel ?? defaultModel;
+    const servedModelUsed = runResult.meta?.agentMeta?.servedModel;
     const providerUsed =
       runResult.meta?.agentMeta?.provider ?? fallbackProvider ?? followupRun.run.provider;
     const verboseEnabled = resolvedVerboseLevel !== "off";
@@ -1447,6 +1448,7 @@ export async function runReplyAgent(params: {
       lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
       promptTokens,
       modelUsed,
+      servedModelUsed,
       providerUsed,
       contextTokensUsed,
       systemPromptReport: runResult.meta?.systemPromptReport,
