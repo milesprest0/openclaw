@@ -32,6 +32,8 @@
   - Added integration spec that verifies mismatch fallback vectors are rejected without corrupting writes or crashing sync.
 - `extensions/memory-core/src/memory/embeddings.test.ts`
   - Added helper-level mismatch detection/classifier tests.
+- `docs/.generated/config-baseline.sha256`
+  - Regenerated config-surface baseline hash for the two new optional `memorySearch` fields (`pnpm config:docs:gen`); `pnpm config:docs:check` is green.
 
 ## New required tests added
 
@@ -61,33 +63,46 @@ Tail:
 
 ### Typecheck
 
-Command:
+Commands (touched lanes: core prod, extension prod, extension test):
 
 ```bash
-pnpm tsgo
+pnpm tsgo:core
+pnpm tsgo:extensions
+pnpm tsgo:extensions:test
+```
+
+Result: all three lanes exited clean with zero diagnostics.
+
+### Config-surface baseline
+
+Commands:
+
+```bash
+pnpm config:docs:gen
+pnpm config:docs:check
 ```
 
 Tail:
 
 ```text
-> openclaw@2026.5.6 tsgo:core /tmp/embed-fallback-20260627-190824
-> node scripts/run-tsgo.mjs -p tsconfig.core.json --incremental --tsBuildInfoFile .artifacts/tsgo-cache/core.tsbuildinfo
+OK docs/.generated/config-baseline.sha256
 ```
 
-### Lint
+### Lint / format (touched files)
 
-Command:
+Commands:
 
 ```bash
-pnpm lint
+pnpm exec oxfmt --check --threads=1 <touched files>
+node scripts/run-oxlint.mjs --tsconfig config/tsconfig/oxlint.extensions.json <touched extension files>
+node scripts/run-oxlint.mjs --tsconfig config/tsconfig/oxlint.core.json <touched core files>
 ```
 
 Tail:
 
 ```text
+All matched files use the correct format.
 Found 0 warnings and 0 errors.
-Finished in 18.0s on 5195 files with 213 rules using 1 threads.
-[oxlint:extensions] finished
 ```
 
 ### Memory-core tests
@@ -103,5 +118,5 @@ Tail:
 ```text
 Test Files  35 passed (35)
 Tests      317 passed (317)
-[test] passed 1 Vitest shard in 9.67s
+[test] passed 1 Vitest shard in 9.30s
 ```
