@@ -96,28 +96,33 @@ function isEmbeddedHarnessProvider(provider: string): boolean {
 export function resolveReportedModelRef(params: {
   provider: string;
   model: string;
-  assistant?: { provider?: string; model?: string } | null;
+  assistant?: { provider?: string; model?: string; servedModel?: string } | null;
 }): {
   provider: string;
   model: string;
+  servedModel?: string;
 } {
   const assistantProvider = params.assistant?.provider?.trim();
   const assistantModel = params.assistant?.model?.trim();
+  const assistantServedModel = params.assistant?.servedModel?.trim();
   if (!assistantProvider) {
     return {
       provider: params.provider,
       model: assistantModel || params.model,
+      ...(assistantServedModel ? { servedModel: assistantServedModel } : {}),
     };
   }
   if (isEmbeddedHarnessProvider(assistantProvider)) {
     return {
       provider: params.provider,
       model: params.model,
+      ...(assistantServedModel ? { servedModel: assistantServedModel } : {}),
     };
   }
   return {
     provider: assistantProvider,
     model: assistantModel || params.model,
+    ...(assistantServedModel ? { servedModel: assistantServedModel } : {}),
   };
 }
 

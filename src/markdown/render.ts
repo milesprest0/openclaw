@@ -17,6 +17,15 @@ export type RenderLink = {
 export type RenderOptions = {
   styleMarkers: RenderStyleMap;
   escapeText: (text: string) => string;
+  /**
+   * Optional escaper applied to literal text rendered INSIDE a code or
+   * code_block span. Defaults to `escapeText` when omitted, so callers that do
+   * not distinguish code interiors keep their existing behavior. Channels whose
+   * `escapeText` mutates characters that are literal inside code (e.g. Slack
+   * neutralizing `~` to avoid accidental strikethrough) should supply this to
+   * preserve code-span content such as `~/path`.
+   */
+  escapeCode?: (text: string) => string;
   buildLink?: (link: MarkdownLinkSpan, text: string) => RenderLink | null;
 };
 
@@ -105,7 +114,8 @@ export function renderMarkdownWithMarkers(ir: MarkdownIR, options: RenderOptions
 
   const points = [...boundaries].toSorted((a, b) => a - b);
   // Unified stack for both styles and links, tracking close string and end position
-  const stack: { close: string; end: number }[] = [];
+  const stack: { close: string; end: number; code?: boolean }[] = [];
+  let codeDepth = 0;
   type OpeningItem =
     | { end: number; open: string; close: string; kind: "link"; index: number }
     | {
@@ -126,6 +136,9 @@ export function renderMarkdownWithMarkers(ir: MarkdownIR, options: RenderOptions
       const item = stack.pop();
       if (item) {
         out += item.close;
+        if (item.code) {
+          codeDepth -= 1;
+        }
       }
     }
 
@@ -179,7 +192,12 @@ export function renderMarkdownWithMarkers(ir: MarkdownIR, options: RenderOptions
       // Open outer spans first (larger end) so LIFO closes stay valid for same-start overlaps.
       for (const item of openingItems) {
         out += item.open;
-        stack.push({ close: item.close, end: item.end });
+        const isCode =
+          item.kind === "style" && (item.style === "code" || item.style === "code_block");
+        if (isCode) {
+          codeDepth += 1;
+        }
+        stack.push({ close: item.close, end: item.end, code: isCode });
       }
     }
 
@@ -188,7 +206,10 @@ export function renderMarkdownWithMarkers(ir: MarkdownIR, options: RenderOptions
       break;
     }
     if (next > pos) {
-      out += options.escapeText(text.slice(pos, next));
+      const slice = text.slice(pos, next);
+      const escape =
+        codeDepth > 0 ? (options.escapeCode ?? options.escapeText) : options.escapeText;
+      out += escape(slice);
     }
   }
 

@@ -119,6 +119,7 @@ type MutableAssistantOutput = {
   api: Api;
   provider: string;
   model: string;
+  servedModel?: string;
   usage: {
     input: number;
     output: number;
@@ -604,6 +605,9 @@ async function processResponsesStream(
       const response = event.response as Record<string, unknown> | undefined;
       if (typeof response?.id === "string") {
         output.responseId = response.id;
+      }
+      if (typeof response?.model === "string" && response.model) {
+        output.servedModel = response.model;
       }
       const usage = response?.usage as
         | {
@@ -1521,6 +1525,9 @@ async function processOpenAICompletionsStream(
     }
     const chunk = rawChunk as ChatCompletionChunk;
     output.responseId ||= chunk.id;
+    if (typeof chunk.model === "string" && chunk.model) {
+      output.servedModel = chunk.model;
+    }
     if (chunk.usage) {
       output.usage = parseTransportChunkUsage(chunk.usage, model);
     }

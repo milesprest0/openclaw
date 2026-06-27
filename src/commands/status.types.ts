@@ -26,6 +26,7 @@ export type SessionStatus = {
   remainingTokens: number | null;
   percentUsed: number | null;
   model: string | null;
+  servedModel?: string | null;
   runtime?: string | null;
   contextTokens: number | null;
   flags: string[];

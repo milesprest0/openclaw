@@ -327,6 +327,7 @@ export type SessionEntry = {
   cacheWrite?: number;
   modelProvider?: string;
   model?: string;
+  servedModel?: string;
   /**
    * Embedded agent harness selected for this session id.
    * Prevents config/env changes from moving an existing transcript between

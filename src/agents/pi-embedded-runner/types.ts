@@ -9,6 +9,7 @@ export type EmbeddedPiAgentMeta = {
   sessionFile?: string;
   provider: string;
   model: string;
+  servedModel?: string;
   contextTokens?: number;
   agentHarnessId?: string;
   fallbackAttempts?: FallbackAttempt[];

@@ -59,14 +59,53 @@ function escapeSlackMrkdwnContent(text: string): string {
   return out.join("");
 }
 
+// Slack mrkdwn renders a pair of bare `~` as strikethrough (single tilde, not
+// `~~`). Models routinely emit `~` as shorthand for "approximately" (`~$12K`,
+// `~85%`, `~300`), and Slack greedily pairs those stray tildes, striking through
+// everything between them. Backslash-escaping (`\~`) is unreliable on outbound
+// bot messages, so we deterministically replace literal ASCII tildes in normal
+// text with the visually identical Unicode tilde operator (U+223C), which Slack
+// never treats as a strikethrough delimiter. This runs ONLY on non-code text:
+// genuine strikethrough is emitted via Slack style markers (not text), and code
+// span interiors (`~/path`) are routed through escapeSlackMrkdwnCode instead, so
+// neither is affected. Applied fleet-wide to every Slack tenant via this shared
+// outbound formatter.
+const SLACK_TILDE_OPERATOR = "\u223c";
+
+function neutralizeStraySlackTildes(text: string): string {
+  return text.includes("~") ? text.replace(/~/g, SLACK_TILDE_OPERATOR) : text;
+}
+
 function escapeSlackMrkdwnText(text: string): string {
+  if (!text) {
+    return "";
+  }
+  if (!text.includes("&") && !text.includes("<") && !text.includes(">") && !text.includes("~")) {
+    return text;
+  }
+
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("> ")) {
+        return `> ${neutralizeStraySlackTildes(escapeSlackMrkdwnContent(line.slice(2)))}`;
+      }
+      return neutralizeStraySlackTildes(escapeSlackMrkdwnContent(line));
+    })
+    .join("\n");
+}
+
+// Code-span interiors must keep literal `~` (e.g. `~/projects`, regex, ranges).
+// Slack does NOT apply mrkdwn formatting inside backtick code spans, so a tilde
+// there is harmless and must be preserved verbatim. We still HTML-escape so
+// angle brackets / ampersands stay literal.
+function escapeSlackMrkdwnCode(text: string): string {
   if (!text) {
     return "";
   }
   if (!text.includes("&") && !text.includes("<") && !text.includes(">")) {
     return text;
   }
-
   return text
     .split("\n")
     .map((line) => {
@@ -114,6 +153,7 @@ function buildSlackRenderOptions() {
       code_block: { open: "```\n", close: "```" },
     },
     escapeText: escapeSlackMrkdwnText,
+    escapeCode: escapeSlackMrkdwnCode,
     buildLink: buildSlackLink,
   };
 }

@@ -813,6 +813,7 @@ async function finalizeCronRun(params: {
     finalRunResult.meta?.agentMeta?.model ??
     execution.fallbackModel ??
     execution.liveSelection.model;
+  const servedModelUsed = finalRunResult.meta?.agentMeta?.servedModel;
   const providerUsed =
     finalRunResult.meta?.agentMeta?.provider ??
     execution.fallbackProvider ??
@@ -829,6 +830,7 @@ async function finalizeCronRun(params: {
     provider: providerUsed,
     model: modelUsed,
   });
+  prepared.cronSession.sessionEntry.servedModel = servedModelUsed ?? modelUsed;
   prepared.cronSession.sessionEntry.contextTokens = contextTokens;
   if (isCliProvider(providerUsed, prepared.cfgWithAgentDefaults)) {
     const cliSessionId = finalRunResult.meta?.agentMeta?.sessionId?.trim();

@@ -94,6 +94,7 @@ type MutableAssistantOutput = {
   api: "anthropic-messages";
   provider: string;
   model: string;
+  servedModel?: string;
   usage: {
     input: number;
     output: number;
@@ -907,10 +908,13 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
           }
           if (event.type === "message_start") {
             const message = event.message as
-              | { id?: string; usage?: Record<string, unknown> }
+              | { id?: string; model?: string; usage?: Record<string, unknown> }
               | undefined;
             const usage = message?.usage ?? {};
             output.responseId = typeof message?.id === "string" ? message.id : undefined;
+            if (typeof message?.model === "string" && message.model) {
+              output.servedModel = message.model;
+            }
             output.usage.input = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
             output.usage.output = typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
             output.usage.cacheRead =
