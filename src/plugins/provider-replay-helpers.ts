@@ -97,6 +97,14 @@ export function shouldPreserveThinkingBlocks(modelId?: string): boolean {
     return true;
   }
 
+  // Always-latest aliases (e.g. "claude-opus-latest", "~anthropic/claude-sonnet-latest")
+  // resolve to the current generation, which is 4.5+ and preserves thinking natively.
+  // The version-number checks above miss these because the alias carries no digit, so
+  // match the alias form explicitly to keep eviction off Claude cache-preserving paths.
+  if (/(?:opus|sonnet|haiku)-latest/.test(id)) {
+    return true;
+  }
+
   // Future-proofing: claude-5-x, claude-6-x etc. should also preserve
   if (/claude-[5-9]/.test(id) || /claude-\d{2,}/.test(id)) {
     return true;
