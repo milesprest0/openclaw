@@ -260,6 +260,13 @@ export type AgentDefaultsConfig = {
      * model backends. Experimental preview only.
      */
     localModelLean?: boolean;
+    /**
+     * Phase 1 thinking-block eviction from replayed history.
+     * - "off" (default): no change.
+     * - "shadow": measure projected savings only; keep outbound messages unchanged.
+     * - "on": apply dropReasoningFromHistory on safe paths.
+     */
+    thinkingEviction?: "off" | "shadow" | "on";
   };
   /**
    * Agent-visible bootstrap truncation warning mode:

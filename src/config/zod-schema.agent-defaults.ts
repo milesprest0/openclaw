@@ -122,6 +122,9 @@ export const AgentDefaultsSchema = z
     experimental: z
       .object({
         localModelLean: z.boolean().optional(),
+        thinkingEviction: z
+          .union([z.literal("off"), z.literal("shadow"), z.literal("on")])
+          .optional(),
       })
       .strict()
       .optional(),

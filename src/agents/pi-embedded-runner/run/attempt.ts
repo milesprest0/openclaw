@@ -39,6 +39,7 @@ import {
   extractModelCompat,
   resolveToolCallArgumentsEncoding,
 } from "../../../plugins/provider-model-compat.js";
+import { shouldPreserveThinkingBlocks } from "../../../plugins/provider-replay-helpers.js";
 import {
   resolveProviderSystemPromptContribution,
   resolveProviderTextTransforms,
@@ -255,6 +256,10 @@ import {
   shouldCreateBundleLspRuntimeForAttempt,
   shouldCreateBundleMcpRuntimeForAttempt,
 } from "./attempt-tool-construction-plan.js";
+import {
+  resolveThinkingEvictionPlan,
+  type ThinkingEvictionMode,
+} from "./thinking-eviction-plan.js";
 export { buildContextEnginePromptCacheInfo } from "./attempt.context-engine-helpers.js";
 import {
   rotateTranscriptAfterCompaction,
@@ -1487,6 +1492,16 @@ export async function runEmbeddedAttempt(
         config: params.config,
         env: process.env,
       });
+      const thinkingEvictionMode =
+        (params.config?.agents?.defaults?.experimental?.thinkingEviction as
+          | ThinkingEvictionMode
+          | undefined) ?? "off";
+      const thinkingEvictionPlan = resolveThinkingEvictionPlan({
+        mode: thinkingEvictionMode,
+        evictionSafe: !shouldPreserveThinkingBlocks(
+          (params.model as { id?: string } | undefined)?.id ?? params.modelId,
+        ),
+      });
 
       await prewarmSessionFile(params.sessionFile);
       sessionManager = guardSessionManager(SessionManager.open(params.sessionFile), {
@@ -2066,7 +2081,11 @@ export async function runEmbeddedAttempt(
       // (e.g. thinkingSignature:"reasoning_text") on any follow-up provider
       // call, including tool continuations. Wrap the stream function so every
       // outbound request sees sanitized messages.
-      if (transcriptPolicy.dropThinkingBlocks || transcriptPolicy.dropReasoningFromHistory) {
+      if (
+        transcriptPolicy.dropThinkingBlocks ||
+        transcriptPolicy.dropReasoningFromHistory ||
+        thinkingEvictionPlan.measure
+      ) {
         const inner = activeSession.agent.streamFn;
         activeSession.agent.streamFn = (model, context, options) => {
           const ctx = context as unknown as { messages?: unknown };
@@ -2077,9 +2096,26 @@ export async function runEmbeddedAttempt(
           const reasoningSanitized = transcriptPolicy.dropReasoningFromHistory
             ? dropReasoningFromHistory(messages as unknown as AgentMessage[])
             : (messages as unknown as AgentMessage[]);
-          const sanitized = transcriptPolicy.dropThinkingBlocks
+          let sanitized = transcriptPolicy.dropThinkingBlocks
             ? (dropThinkingBlocks(reasoningSanitized) as unknown)
             : (reasoningSanitized as unknown);
+          if (thinkingEvictionPlan.measure) {
+            const evicted = dropReasoningFromHistory(sanitized as AgentMessage[]);
+            if (evicted !== sanitized) {
+              const beforeEstTokens = Math.max(0, Math.round(JSON.stringify(sanitized).length / 4));
+              const afterEstTokens = Math.max(0, Math.round(JSON.stringify(evicted).length / 4));
+              const savedTokens = Math.max(0, beforeEstTokens - afterEstTokens);
+              const savedPct = beforeEstTokens > 0 ? (savedTokens / beforeEstTokens) * 100 : 0;
+              log.info(
+                `[thinking-eviction] mode=${thinkingEvictionMode} sessionKey=${params.sessionKey} ` +
+                  `provider=${params.provider}/${params.modelId} before=~${beforeEstTokens} ` +
+                  `after=~${afterEstTokens} savedTokens=~${savedTokens} savedPct=${savedPct.toFixed(1)}%`,
+              );
+              if (thinkingEvictionPlan.apply) {
+                sanitized = evicted as unknown;
+              }
+            }
+          }
           if (sanitized === messages) {
             return inner(model, context, options);
           }

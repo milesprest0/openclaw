@@ -64,6 +64,15 @@ describe("agent defaults schema", () => {
     expect(result.experimental?.localModelLean).toBe(true);
   });
 
+  it("accepts experimental.thinkingEviction", () => {
+    const result = AgentDefaultsSchema.parse({
+      experimental: {
+        thinkingEviction: "shadow",
+      },
+    })!;
+    expect(result.experimental?.thinkingEviction).toBe("shadow");
+  });
+
   it("accepts contextInjection: always", () => {
     const result = AgentDefaultsSchema.parse({ contextInjection: "always" })!;
     expect(result.contextInjection).toBe("always");

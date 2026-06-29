@@ -1,81 +1,127 @@
-# PLAN: Dimension-safe memory embedding fallback (Tier-12 design #1)
+# PLAN.md — Phase 1: strip prior-turn thinking blocks from replayed history
 
-## Problem
+Branch: `feat/thinking-eviction-phase1-20260628` (off clean main 7ea4bef5a1)
+Goal: cut the ~17k tokens/turn that replayed prior-turn `thinking` blocks add to the
+prompt — WITHOUT degrading reasoning continuity OR prompt-cache economics.
 
-`agents.defaults.memorySearch.fallback` lets you name ONE backup embedding provider that
-is used when the primary embedding call fails. But the runtime resolves the fallback's
-_model_ via `resolveEmbeddingProviderFallbackModel(...)`
-(extensions/memory-core/src/memory/manager-provider-state.ts:102), which returns the
-fallback ADAPTER's own `defaultModel`. The `openai` adapter's default is
-`text-embedding-3-small` (1536-dim). Our store is pinned at 3072-dim (gemini-embedding-2-preview).
+## Critical context discovered during investigation (DO NOT re-derive — build on this)
 
-Two concrete defects this causes:
+The eviction primitives ALREADY EXIST and are ALREADY wired into the live send path.
+This phase is a **scoped, kill-switched ENABLEMENT** on the paths where it is safe.
 
-1. DIMENSION CORRUPTION / OUTAGE: a real failover would embed at 1536 and write into a
-   3072 store -> unqueryable / corrupt index. This is the "whole system goes down when
-   utilized" risk we must eliminate.
-2. SAME-PROVIDER FALLBACK BLOCKED: `resolveMemoryFallbackProviderRequest` returns null when
-   `fallback === currentProviderId` (manager-provider-state.ts:~95). Our primary already runs
-   through the `openai` adapter (OpenRouter baseUrl -> google/gemini-embedding-2-preview), so we
-   currently cannot configure a same-adapter, different-model fallback over the same transport.
+- `src/agents/pi-embedded-runner/thinking.ts`
+  - `dropReasoningFromHistory(messages)` — THE safe lever. Strips thinking from _completed_
+    turns only; PRESERVES reasoning for the active tool-call continuation (the assistant
+    turn after the latest user message that issued a toolCall and is awaiting a toolResult).
+    Signature-safe; replaces a reasoning-only turn with `[assistant reasoning omitted]` text
+    so turn structure survives provider adapters. Returns the SAME reference when unchanged.
+  - `dropThinkingBlocks(messages)` — blunter: keeps only the LATEST assistant turn's thinking.
+    NOT our default lever for phase 1 (less surgical). Leave behavior unchanged.
+  - `stripInvalidThinkingSignatures` — already runs in replay-history; leave as-is.
+  - Tests in `thinking.test.ts` already cover active-tool-loop preservation (25 tests).
+- Live wiring: `src/agents/pi-embedded-runner/run/attempt.ts` ~line 2069 installs a streamFn
+  wrapper when `transcriptPolicy.dropThinkingBlocks || transcriptPolicy.dropReasoningFromHistory`
+  is true; it calls `dropReasoningFromHistory` / `dropThinkingBlocks` on every outbound request.
+- Policy resolution: `src/agents/transcript-policy.ts` merges from the provider plugin's
+  `buildReplayPolicy(ctx)`. Defaults are all-false.
+- Our LIVE provider path (`openrouter/google/gemini-3.5-flash`) resolves to
+  `PASSTHROUGH_GEMINI_REPLAY_HOOKS` → `buildPassthroughGeminiSanitizingReplayPolicy(modelId)`
+  in `src/plugins/provider-replay-helpers.ts`, which sets NEITHER `dropReasoningFromHistory`
+  NOR `dropThinkingBlocks`. => thinking is currently REPLAYED in full on this path. This is
+  the ~17k/turn we measured.
 
-## Goal (design #1 — dimension-pinned single fallback)
+## The performance-safety guardrails (this is the "must not degrade" core)
 
-Let operators pin BOTH the fallback model AND its output dimensionality so the fallback only
-ever emits vectors that match the primary store. For prest0-vm: primary
-gemini-embedding-2-preview @3072, fallback openai/text-embedding-3-large pinned @3072.
+1. **Reasoning continuity:** use `dropReasoningFromHistory` (NOT `dropThinkingBlocks`). It
+   already preserves the active tool-call loop + signatures. Never strip the in-flight turn.
+2. **Prompt-cache prefix matching:** `shouldPreserveThinkingBlocks(modelId)` (already in
+   provider-replay-helpers.ts) returns true for Claude 4.5+ because dropping thinking there
+   INVALIDATES the cached prefix and costs MORE. Our new enablement MUST be gated so it NEVER
+   turns on for a model where `shouldPreserveThinkingBlocks(modelId) === true`.
+3. **Non-destructive:** eviction is request-local (the streamFn wrapper). The session file on
+   disk keeps full thinking for audit/resume/debug. Zero data loss, fully reversible.
+4. **Kill switch + phased:** a single config flag with three states (off | shadow | on),
+   default `off`. Instant disable.
 
-## Scope of code change (surgical, memory-core only)
+## Config flag
 
-1. SCHEMA — add two OPTIONAL fields under `agents.defaults.memorySearch` (and per-agent override):
-   - `fallbackModel?: string` — explicit model id for the fallback provider. When set, it OVERRIDES
-     the fallback adapter's `defaultModel`. When unset, behavior is unchanged (back-compat).
-   - `fallbackOutputDimensionality?: number` — output dim for the fallback request. When unset,
-     falls back to `outputDimensionality` (same as primary), preserving store consistency.
-     Update: src/config/types\*.ts (the memorySearch type), src/config/schema.help.ts (help text),
-     src/config/schema.labels.ts (labels). Mirror into ResolvedMemorySearchConfig in
-     src/agents/memory-search.ts (mergeConfig + the returned object), defaulting like the others.
+Add to `src/config/types.agent-defaults.ts` under the existing `experimental` block:
 
-2. RESOLVER — extensions/memory-core/src/memory/manager-provider-state.ts
-   `resolveMemoryFallbackProviderRequest`:
-   - model: prefer `settings.fallbackModel` when present; else keep
-     `resolveEmbeddingProviderFallbackModel(fallback, settings.model, cfg)` (unchanged default).
-   - outputDimensionality: prefer `settings.fallbackOutputDimensionality ?? settings.outputDimensionality`.
-   - Relax the `fallback === currentProviderId` skip: allow same-provider fallback ONLY when a
-     distinct `fallbackModel` is configured (so we can reuse the OpenRouter transport to switch
-     model). If fallbackModel is absent AND ids match, keep returning null (no-op, unchanged).
+```ts
+experimental?: {
+  localModelLean?: boolean;
+  /**
+   * Phase 1 thinking-block eviction from replayed history.
+   * - "off"    (default): no change; thinking replayed as today.
+   * - "shadow": compute + log projected token savings each turn, but send the
+   *             ORIGINAL messages unchanged (measurement only, zero behavior change).
+   * - "on":     apply dropReasoningFromHistory to outbound requests on safe paths.
+   * Never applies when shouldPreserveThinkingBlocks(modelId) is true (cache safety).
+   */
+  thinkingEviction?: "off" | "shadow" | "on";
+};
+```
 
-3. SAFETY GUARD (defense in depth) — wherever a resolved fallback vector is about to be written,
-   assert the produced embedding length === the store's pinned `vectorDims`. On mismatch: DO NOT
-   write, log a clear error, and surface as a normal embedding failure (graceful degrade), never a
-   crash and never a corrupting write. Find the write path in
-   extensions/memory-core/src/memory/manager-sync-ops.ts (search the embed->upsert path) and add a
-   dimension check before persistence. If a shared assert helper is cleaner, add one in
-   extensions/memory-core/src/memory/embeddings.ts.
+Add the matching zod enum in the agent-defaults experimental schema (find where
+`localModelLean` is validated and mirror it; default to "off" / optional).
 
-## Tests (MUST add, this is a persistence path)
+## Implementation (centralized in attempt.ts — ONE site, lowest blast radius)
 
-Add/extend vitest specs under extensions/memory-core/src/memory/ (co-located \*.test.ts):
+In `src/agents/pi-embedded-runner/run/attempt.ts`, near the existing eviction wrapper
+(~line 2069):
 
-- a) fallback uses explicit `fallbackModel` (not the adapter defaultModel) when configured.
-- b) fallback request carries the pinned outputDimensionality (3072), not the adapter native default.
-- c) same-provider fallback (provider="openai", fallback="openai") is ALLOWED when fallbackModel differs,
-  and still returns null when fallbackModel is absent (back-compat).
-- d) dimension guard: a fallback embedding whose length != store vectorDims is rejected (no write,
-  no throw to caller-as-crash) — degrades gracefully.
-- e) back-compat: with no new fields set, behavior is byte-for-byte unchanged (existing tests pass).
+1. Resolve `const thinkingEvictionMode = <config>.agentDefaults?.experimental?.thinkingEviction ?? "off";`
+   (use the same config-resolution pattern already used in that file for agentDefaults;
+   match how other experimental flags are read).
+2. Compute a safety gate:
+   `const evictionSafe = !shouldPreserveThinkingBlocks(params.model?.id ?? params.modelId);`
+   Import `shouldPreserveThinkingBlocks` from `../../../plugins/provider-replay-helpers.js`
+   (fix the relative path to match attempt.ts depth).
+3. Extend the EXISTING wrapper condition so the wrapper also installs when
+   `thinkingEvictionMode !== "off" && evictionSafe`. Keep all existing policy-driven behavior
+   (`transcriptPolicy.dropThinkingBlocks` / `dropReasoningFromHistory`) intact and FIRST.
+4. Inside the wrapper, after the existing policy-driven sanitation produces `sanitized`:
+   - If `thinkingEvictionMode !== "off" && evictionSafe`, compute
+     `const evicted = dropReasoningFromHistory(sanitized as AgentMessage[]);`
+   - SHADOW: if mode === "shadow", and `evicted !== sanitized`, log a single line and send
+     `sanitized` (UNCHANGED):
+     `log.info("[thinking-eviction] mode=shadow sessionKey=… provider=…/… before=<n> after=<m> savedTokens=<n-m> savedPct=<…>")`
+     where before/after are estimated via the existing token estimator already imported in
+     attempt.ts (reuse whatever `estimateMessagesTokens`/equivalent is in scope; if none, use
+     a cheap `JSON.stringify(...).length / 4` heuristic and label it `~estTokens`). Do NOT add
+     a heavy new dependency.
+   - ON: if mode === "on", set `sanitized = evicted` (so it is actually sent) and log
+     `[thinking-eviction] mode=on … savedTokens=…`.
+5. Preserve the existing `if (sanitized === messages) return inner(...)` fast-path semantics.
 
-## Build/verify gates (do all, report results)
+Keep the diff surgical. Do not refactor unrelated code. Do not touch MEMORY.md/AGENTS.md.
 
-- `npm run build` (or the repo's typecheck/build script) — zero errors.
-- Run the memory-core test suite for the touched files (vitest) — all green, including new specs.
-- Run `npm run lint` if present on touched files.
-- DO NOT deploy. DO NOT run any reindex. DO NOT modify ~/.openclaw config.
-- Leave a short SUMMARY.md at repo root: files changed, test names added, build+test output tail.
+## Tests (REQUIRED — this is full SDLC, touches the prompt-assembly path)
 
-## Hard constraints
+1. Extend `thinking.test.ts` ONLY if a gap exists (active-loop preservation already covered).
+2. Add a focused unit test for the new mode logic. Prefer a small test on a pure helper:
+   refactor the mode decision into a tiny exported pure function if it makes testing clean,
+   e.g. `resolveThinkingEvictionPlan({ mode, evictionSafe })` returning
+   `{ apply: boolean; measure: boolean }`, and unit-test its truth table:
+   - off → {apply:false, measure:false}
+   - shadow + safe → {apply:false, measure:true}
+   - on + safe → {apply:true, measure:true}
+   - shadow|on + UNSAFE (shouldPreserveThinkingBlocks true) → {apply:false, measure:false}
+3. Golden continuity assertion: a test proving that with mode="on", an active tool-call
+   continuation transcript is returned BYTE-IDENTICAL (reference-equal is fine) — i.e. the
+   in-flight reasoning chain is never stripped. (dropReasoningFromHistory already guarantees
+   this; assert it at the integration boundary so a future refactor can't regress it.)
 
-- memory-core + config schema only. Do not touch unrelated providers, chat-model fallback, or runtime.
-- Preserve full back-compat: all new config fields optional; unset = today's behavior.
-- No network calls in tests; mock adapters.
-- Commit on this branch (feat/embedding-dimension-safe-fallback) with a clear message. Do NOT push, do NOT open a PR yet.
+## Build / verify (must all pass before reporting done)
+
+```
+npm run build        # or the repo's typecheck/build script (check package.json)
+npx vitest run src/agents/pi-embedded-runner/thinking.test.ts
+npx vitest run <new test file>
+```
+
+Report: files changed, test results, and the projected per-turn savings logic. Do NOT push,
+do NOT open a PR, do NOT merge to main — stop after green build + tests and summarize.
+
+When completely finished, run:
+openclaw system event --text "Done: phase1 thinking-eviction built + tests green" --mode now
