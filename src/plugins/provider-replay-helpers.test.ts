@@ -9,6 +9,7 @@ import {
   resolveTaggedReasoningOutputMode,
   sanitizeGoogleGeminiReplayHistory,
   buildStrictAnthropicReplayPolicy,
+  shouldPreserveThinkingBlocks,
 } from "./provider-replay-helpers.js";
 
 describe("provider replay helpers", () => {
@@ -199,6 +200,52 @@ describe("provider replay helpers", () => {
     expect(
       buildPassthroughGeminiSanitizingReplayPolicy("anthropic/claude-sonnet-4-6"),
     ).not.toHaveProperty("sanitizeThoughtSignatures");
+  });
+
+  describe("shouldPreserveThinkingBlocks", () => {
+    it("preserves thinking for versioned Claude 4.5+ ids", () => {
+      for (const modelId of [
+        "claude-opus-4-6",
+        "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5",
+        "us.anthropic.claude-opus-4-6-v1",
+      ]) {
+        expect(shouldPreserveThinkingBlocks(modelId)).toBe(true);
+      }
+    });
+
+    it("preserves thinking for always-latest Claude aliases (regression: gate gap)", () => {
+      // These resolve to the current 4.5+ generation but carry no version digit,
+      // so the older opus-4/sonnet-4/haiku-4 checks miss them. Eviction MUST stay
+      // off these paths because they cache history + preserve signatures natively.
+      for (const modelId of [
+        "~anthropic/claude-opus-latest",
+        "anthropic/claude-opus-latest",
+        "claude-opus-latest",
+        "claude-sonnet-latest",
+        "claude-haiku-latest",
+        "openrouter/~anthropic/claude-opus-latest",
+      ]) {
+        expect(shouldPreserveThinkingBlocks(modelId)).toBe(true);
+      }
+    });
+
+    it("future-proofs Claude 5+ generations", () => {
+      expect(shouldPreserveThinkingBlocks("claude-5-opus")).toBe(true);
+      expect(shouldPreserveThinkingBlocks("anthropic/claude-7-sonnet")).toBe(true);
+    });
+
+    it("still drops thinking for legacy Claude and non-Claude models", () => {
+      for (const modelId of [
+        "claude-3-7-sonnet-20250219",
+        "claude-3-5-sonnet-20240620",
+        "google/gemini-3.5-flash",
+        "openai/gpt-5.5",
+        undefined,
+      ]) {
+        expect(shouldPreserveThinkingBlocks(modelId)).toBe(false);
+      }
+    });
   });
 
   it("sanitizes Gemini replay ordering with a bootstrap turn", () => {
