@@ -18,6 +18,29 @@ export function isGooglePromptCacheEligible(params: {
 }
 
 /**
+ * Returns true for Google/Gemini models routed via OpenRouter, where Gemini
+ * does NOT perform implicit prefix caching and therefore needs explicit
+ * `cache_control` breakpoint markers (OpenRouter's universal cache protocol)
+ * to cache a stable prefix. Distinct from {@link isGooglePromptCacheEligible},
+ * which targets the native google-generative-ai route; here the route is
+ * OpenRouter (api=openai-completions), so we gate on provider + model family
+ * rather than modelApi. Recognises the `~` always-latest alias prefix.
+ * (2026-06-29 — verified via live OpenRouter cold/warm probe: markers required
+ * for any Gemini cache hit over OpenRouter.)
+ */
+export function isOpenRouterGoogleCacheEligible(params: {
+  provider?: string;
+  modelId?: string;
+}): boolean {
+  if (normalizeOptionalLowercaseString(params.provider) !== "openrouter") {
+    return false;
+  }
+  const modelId = normalizeLowercaseStringOrEmpty(params.modelId).replace(/^~/, "");
+  const bare = modelId.startsWith("google/") ? modelId.slice("google/".length) : modelId;
+  return bare.startsWith("gemini-2.5") || bare.startsWith("gemini-3");
+}
+
+/**
  * Returns true for OpenAI/GPT models routed via OpenRouter, where OpenAI
  * automatically applies implicit prefix caching on inputs ≥ 1,024 tokens.
  * Recognises both plain OpenAI provider references and OpenRouter-proxied

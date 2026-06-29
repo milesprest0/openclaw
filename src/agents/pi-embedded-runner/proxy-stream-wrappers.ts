@@ -6,6 +6,7 @@ import { resolveProviderRequestPolicy } from "../provider-attribution.js";
 import { resolveProviderRequestPolicyConfig } from "../provider-request-config.js";
 import { applyAnthropicEphemeralCacheControlMarkers } from "./anthropic-cache-control-payload.js";
 import { isAnthropicModelRef } from "./anthropic-family-cache-semantics.js";
+import { isOpenRouterGoogleCacheEligible } from "./prompt-cache-retention.js";
 import { mapThinkingLevelToReasoningEffort } from "./reasoning-effort-utils.js";
 import { streamWithPayloadPatch } from "./stream-payload-utils.js";
 const KILOCODE_FEATURE_HEADER = "X-KILOCODE-FEATURE";
@@ -159,6 +160,15 @@ export type OpenRouterSystemCacheWrapperOptions = {
    * Resolved per-surface; never implicitly upgraded.
    */
   cacheRetention?: "none" | "short" | "long";
+  /**
+   * When true, also stamp OpenRouter cache_control markers on OpenRouter-routed
+   * Google/Gemini models (gemini-2.5 / gemini-3 family). Gemini does no implicit
+   * prefix caching over OpenRouter, so without markers it never caches. Gated
+   * OFF by default (config: agents.defaults.experimental.openRouterGoogleCache).
+   * Anthropic marker behavior is unchanged regardless of this flag.
+   * (2026-06-29, verified via live cold/warm probe.)
+   */
+  googleMarkers?: boolean;
 };
 
 /**
@@ -187,6 +197,7 @@ export function createOpenRouterSystemCacheWrapper(
 ): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   const retention = resolveOpenRouterCacheRetention(wrapperOptions);
+  const googleMarkers = wrapperOptions?.googleMarkers === true;
   const markerOptions = retention === "long" ? ({ ttl: "1h" } as const) : undefined;
   return (model, context, options) => {
     const provider = readStringValue(model.provider);
@@ -200,10 +211,13 @@ export function createOpenRouterSystemCacheWrapper(
       capability: "llm",
       transport: "stream",
     }).endpointClass;
+    const familyEligible =
+      !!modelId &&
+      (isAnthropicModelRef(modelId) ||
+        (googleMarkers && isOpenRouterGoogleCacheEligible({ provider, modelId })));
     if (
       retention === "none" ||
-      !modelId ||
-      !isAnthropicModelRef(modelId) ||
+      !familyEligible ||
       !(
         endpointClass === "openrouter" ||
         (endpointClass === "default" && normalizeOptionalLowercaseString(provider) === "openrouter")

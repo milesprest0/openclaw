@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isGooglePromptCacheEligible, resolveCacheRetention } from "./prompt-cache-retention.js";
+import {
+  isGooglePromptCacheEligible,
+  isOpenRouterGoogleCacheEligible,
+  resolveCacheRetention,
+} from "./prompt-cache-retention.js";
 
 describe("prompt cache retention", () => {
   it("passes explicit cacheRetention through for direct Google models", () => {
@@ -49,5 +53,50 @@ describe("prompt cache retention", () => {
         modelId: "gemini-live-2.5-flash-preview",
       }),
     ).toBe(false);
+  });
+
+  describe("isOpenRouterGoogleCacheEligible", () => {
+    it("matches OpenRouter-routed gemini-2.5 / gemini-3 families", () => {
+      expect(
+        isOpenRouterGoogleCacheEligible({
+          provider: "openrouter",
+          modelId: "google/gemini-3.5-flash",
+        }),
+      ).toBe(true);
+      expect(
+        isOpenRouterGoogleCacheEligible({
+          provider: "openrouter",
+          modelId: "google/gemini-2.5-pro",
+        }),
+      ).toBe(true);
+    });
+
+    it("tolerates the ~ always-latest alias prefix and bare gemini ids", () => {
+      expect(
+        isOpenRouterGoogleCacheEligible({
+          provider: "openrouter",
+          modelId: "~google/gemini-3-pro",
+        }),
+      ).toBe(true);
+      expect(
+        isOpenRouterGoogleCacheEligible({ provider: "openrouter", modelId: "gemini-3.5-flash" }),
+      ).toBe(true);
+    });
+
+    it("rejects non-OpenRouter providers and non-Gemini / older families", () => {
+      expect(
+        isOpenRouterGoogleCacheEligible({ provider: "google", modelId: "google/gemini-3.5-flash" }),
+      ).toBe(false);
+      expect(
+        isOpenRouterGoogleCacheEligible({
+          provider: "openrouter",
+          modelId: "google/gemini-1.5-flash",
+        }),
+      ).toBe(false);
+      expect(
+        isOpenRouterGoogleCacheEligible({ provider: "openrouter", modelId: "openai/gpt-5.5" }),
+      ).toBe(false);
+      expect(isOpenRouterGoogleCacheEligible({})).toBe(false);
+    });
   });
 });
