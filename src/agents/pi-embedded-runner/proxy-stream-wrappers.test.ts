@@ -5,9 +5,13 @@ import { describe, expect, it } from "vitest";
 import {
   createOpenRouterSystemCacheWrapper,
   createOpenRouterWrapper,
+  type OpenRouterSystemCacheWrapperOptions,
 } from "./proxy-stream-wrappers.js";
 
-function runSystemCacheWrapper(model: Partial<Model<"openai-completions">>) {
+function runSystemCacheWrapper(
+  model: Partial<Model<"openai-completions">>,
+  wrapperOptions?: OpenRouterSystemCacheWrapperOptions,
+) {
   const payload = {
     messages: [{ role: "system", content: "system prompt" }],
   };
@@ -16,7 +20,7 @@ function runSystemCacheWrapper(model: Partial<Model<"openai-completions">>) {
     return createAssistantMessageEventStream();
   };
 
-  const wrapped = createOpenRouterSystemCacheWrapper(baseStreamFn);
+  const wrapped = createOpenRouterSystemCacheWrapper(baseStreamFn, wrapperOptions);
   void wrapped(
     {
       api: "openai-completions",
@@ -206,6 +210,43 @@ describe("proxy stream wrappers", () => {
       baseUrl: "https://openrouter.ai/api/v1",
     });
 
+    expect(payload.messages[0]?.content).toEqual([
+      { type: "text", text: "system prompt", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("does NOT inject cache_control markers for OpenRouter Gemini by default (flag off)", () => {
+    const payload = runSystemCacheWrapper({ id: "google/gemini-3.5-flash" });
+    expect(payload.messages[0]?.content).toBe("system prompt");
+  });
+
+  it("injects cache_control markers for OpenRouter Gemini when googleMarkers is enabled", () => {
+    const payload = runSystemCacheWrapper(
+      { id: "google/gemini-3.5-flash" },
+      { googleMarkers: true },
+    );
+    expect(payload.messages[0]?.content).toEqual([
+      { type: "text", text: "system prompt", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("injects cache_control markers for the ~ always-latest Gemini alias when enabled", () => {
+    const payload = runSystemCacheWrapper({ id: "~google/gemini-3-pro" }, { googleMarkers: true });
+    expect(payload.messages[0]?.content).toEqual([
+      { type: "text", text: "system prompt", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("does NOT inject Gemini markers when googleMarkers is enabled but retention is none", () => {
+    const payload = runSystemCacheWrapper(
+      { id: "google/gemini-3.5-flash" },
+      { googleMarkers: true, cacheRetention: "none" },
+    );
+    expect(payload.messages[0]?.content).toBe("system prompt");
+  });
+
+  it("leaves Anthropic markers intact regardless of the googleMarkers flag", () => {
+    const payload = runSystemCacheWrapper({}, { googleMarkers: true });
     expect(payload.messages[0]?.content).toEqual([
       { type: "text", text: "system prompt", cache_control: { type: "ephemeral" } },
     ]);

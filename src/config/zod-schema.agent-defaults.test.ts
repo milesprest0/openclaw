@@ -73,6 +73,15 @@ describe("agent defaults schema", () => {
     expect(result.experimental?.thinkingEviction).toBe("shadow");
   });
 
+  it("accepts experimental.openRouterGoogleCache", () => {
+    const result = AgentDefaultsSchema.parse({
+      experimental: {
+        openRouterGoogleCache: "on",
+      },
+    })!;
+    expect(result.experimental?.openRouterGoogleCache).toBe("on");
+  });
+
   it("accepts contextInjection: always", () => {
     const result = AgentDefaultsSchema.parse({ contextInjection: "always" })!;
     expect(result.contextInjection).toBe("always");

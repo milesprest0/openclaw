@@ -267,6 +267,17 @@ export type AgentDefaultsConfig = {
      * - "on": apply dropReasoningFromHistory on safe paths.
      */
     thinkingEviction?: "off" | "shadow" | "on";
+    /**
+     * Stamp OpenRouter cache_control markers on OpenRouter-routed Google/Gemini
+     * models (gemini-2.5 / gemini-3 family). Gemini performs no implicit prefix
+     * caching over OpenRouter, so without markers a stable system prefix is
+     * re-billed in full every turn. Enabling this caches the prefix (verified
+     * ~91% input savings on warm turns).
+     * - "off" (default): no markers for Gemini; behavior unchanged.
+     * - "on": inject cache_control markers for eligible Gemini models.
+     * Anthropic marker behavior is independent of this flag.
+     */
+    openRouterGoogleCache?: "off" | "on";
   };
   /**
    * Agent-visible bootstrap truncation warning mode:

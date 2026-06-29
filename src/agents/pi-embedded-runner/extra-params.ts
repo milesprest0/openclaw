@@ -708,6 +708,11 @@ function applyPostPluginStreamWrappers(
     // OpenRouter route (provider=openrouter, api=openai-completions), so we
     // read the explicit value directly here; the wrapper falls back to env/short.
     cacheRetention: normalizeExplicitCacheRetention(ctx.effectiveExtraParams?.cacheRetention),
+    // Out-of-Prest0-mode optimization: when enabled, also stamp OpenRouter
+    // cache_control markers on OpenRouter-routed Gemini models (which do no
+    // implicit prefix caching). Gated OFF by default; flip on per-fleet after
+    // canary. Anthropic path is unaffected. (2026-06-29)
+    googleMarkers: ctx.cfg?.agents?.defaults?.experimental?.openRouterGoogleCache === "on",
   });
   ctx.agent.streamFn = createOpenAIStringContentWrapper(ctx.agent.streamFn);
   ctx.agent.streamFn = createOpenAICompletionsToolsCompatWrapper(ctx.agent.streamFn);
