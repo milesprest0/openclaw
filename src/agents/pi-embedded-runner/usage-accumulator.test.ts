@@ -190,7 +190,7 @@ describe("usage-accumulator", () => {
       expect(resolveLastCallUsage(undefined, acc)).toEqual({
         input: 150,
         output: 40,
-        cacheRead: 84_000,
+        cacheRead: undefined,
         cacheWrite: undefined,
         total: 84_190,
       });
@@ -202,7 +202,7 @@ describe("usage-accumulator", () => {
       expect(resolveLastCallUsage({ responseId: "abc" } as never, acc)).toEqual({
         input: 150,
         output: 40,
-        cacheRead: 84_000,
+        cacheRead: undefined,
         cacheWrite: undefined,
         total: 84_190,
       });

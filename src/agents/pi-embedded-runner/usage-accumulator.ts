@@ -95,4 +95,18 @@ export const toLastCallUsage = (usage: UsageAccumulator): NormalizedUsage | unde
 export const resolveLastCallUsage = (
   rawUsage: UsageLike | null | undefined,
   usageAccumulator: UsageAccumulator,
-): NormalizedUsage | undefined => normalizeUsage(rawUsage) ?? toLastCallUsage(usageAccumulator);
+): NormalizedUsage | undefined => {
+  const liveUsage = normalizeUsage(rawUsage);
+  if (liveUsage) {
+    return liveUsage;
+  }
+  const fallbackUsage = toLastCallUsage(usageAccumulator);
+  if (!fallbackUsage) {
+    return undefined;
+  }
+  return {
+    ...fallbackUsage,
+    cacheRead: undefined,
+    cacheWrite: undefined,
+  };
+};

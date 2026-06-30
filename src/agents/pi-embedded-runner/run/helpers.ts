@@ -1,11 +1,12 @@
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { generateSecureToken } from "../../../infra/secure-random.js";
+import { logDebug } from "../../../logger.js";
 import { extractAssistantTextForPhase } from "../../../shared/chat-message-content.js";
 import { extractAssistantVisibleText } from "../../pi-embedded-utils.js";
-import { derivePromptTokens, normalizeUsage } from "../../usage.js";
+import { derivePromptTokens, normalizeUsage, sanitizePerCallCacheUsage } from "../../usage.js";
 import type { EmbeddedPiAgentMeta } from "../types.js";
-import { toLastCallUsage, toNormalizedUsage, type UsageAccumulator } from "../usage-accumulator.js";
+import { toNormalizedUsage, type UsageAccumulator } from "../usage-accumulator.js";
 
 type UsageSnapshot = {
   input?: number;
@@ -136,9 +137,16 @@ export function buildUsageAgentMetaFields(params: {
   if (usage && params.lastTurnTotal && params.lastTurnTotal > 0) {
     usage.total = params.lastTurnTotal;
   }
-  const lastCallUsage =
-    normalizeUsage(params.lastAssistantUsage as never) ?? toLastCallUsage(params.usageAccumulator);
   const promptTokens = derivePromptTokens(params.lastRunPromptUsage);
+  const lastCallUsage = sanitizePerCallCacheUsage({
+    usage: normalizeUsage(params.lastAssistantUsage as never),
+    promptTokens,
+    onDroppedCacheRead: ({ cacheRead, promptTokens: currentPromptTokens }) => {
+      logDebug(
+        `[usage] dropping untrusted last-call cacheRead=${cacheRead} promptTokens=${currentPromptTokens}`,
+      );
+    },
+  });
   return {
     usage,
     lastCallUsage,

@@ -2,6 +2,7 @@ import { setCliSessionBinding, setCliSessionId } from "../../agents/cli-session.
 import {
   deriveSessionTotalTokens,
   hasNonzeroUsage,
+  sanitizePerCallCacheUsage,
   type NormalizedUsage,
 } from "../../agents/usage.js";
 import { getRuntimeConfig } from "../../config/config.js";
@@ -185,6 +186,15 @@ export async function persistSessionUsageUpdate(params: {
             providerUsed: params.providerUsed ?? entry.modelProvider,
             modelUsed: params.modelUsed ?? entry.model,
           });
+          const safeLastCallUsage = sanitizePerCallCacheUsage({
+            usage: params.lastCallUsage,
+            promptTokens: params.promptTokens,
+            onDroppedCacheRead: ({ cacheRead, promptTokens: currentPromptTokens }) => {
+              logVerbose(
+                `dropping untrusted last-call cacheRead=${cacheRead} promptTokens=${currentPromptTokens}`,
+              );
+            },
+          });
           const patch: Partial<SessionEntry> = {
             modelProvider: params.providerUsed ?? entry.modelProvider,
             model: params.modelUsed ?? entry.model,
@@ -196,11 +206,8 @@ export async function persistSessionUsageUpdate(params: {
           if (hasUsage) {
             patch.inputTokens = params.usage?.input ?? 0;
             patch.outputTokens = params.usage?.output ?? 0;
-            // Cache counters should reflect the latest context snapshot when
-            // available, not accumulated per-call totals across a whole run.
-            const cacheUsage = params.lastCallUsage ?? params.usage;
-            patch.cacheRead = cacheUsage?.cacheRead ?? 0;
-            patch.cacheWrite = cacheUsage?.cacheWrite ?? 0;
+            patch.cacheRead = safeLastCallUsage?.cacheRead ?? 0;
+            patch.cacheWrite = safeLastCallUsage?.cacheWrite ?? 0;
           }
           // Snapshot cost like tokens (runEstimatedCostUsd is already computed from
           // cumulative run usage, so assign directly instead of accumulating).
@@ -221,10 +228,10 @@ export async function persistSessionUsageUpdate(params: {
               model: params.modelUsed ?? entry.model,
               provider: params.providerUsed ?? entry.modelProvider,
               promptTokens: params.promptTokens,
-              lastCallInput: params.lastCallUsage?.input,
-              lastCallOutput: params.lastCallUsage?.output,
-              cacheRead: (params.lastCallUsage ?? params.usage)?.cacheRead,
-              cacheWrite: (params.lastCallUsage ?? params.usage)?.cacheWrite,
+              lastCallInput: safeLastCallUsage?.input,
+              lastCallOutput: safeLastCallUsage?.output,
+              cacheRead: safeLastCallUsage?.cacheRead ?? 0,
+              cacheWrite: safeLastCallUsage?.cacheWrite ?? 0,
               accumInput: params.usage?.input,
               accumOutput: params.usage?.output,
               contextMax: resolvedContextTokens,

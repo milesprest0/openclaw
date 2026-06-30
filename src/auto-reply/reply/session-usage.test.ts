@@ -164,3 +164,83 @@ describe("persistSessionUsageUpdate prompt instrumentation", () => {
     );
   });
 });
+
+describe("persistSessionUsageUpdate cache telemetry integrity", () => {
+  let currentEntry: SessionEntry;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentEntry = {
+      sessionId: "sess-cache",
+      updatedAt: 1,
+      model: "gpt-5.3-codex",
+      modelProvider: "openai",
+    };
+    updateSessionStoreEntryMock.mockImplementation(
+      async (params: { update: (entry: SessionEntry) => Promise<Partial<SessionEntry>> }) => {
+        const patch = await params.update(currentEntry);
+        currentEntry = {
+          ...currentEntry,
+          ...patch,
+        };
+        return currentEntry;
+      },
+    );
+  });
+
+  it("does not leak accumulator cacheRead into zero-cache last-call usage", async () => {
+    await persistSessionUsageUpdate({
+      storePath: "/tmp/store",
+      sessionKey: "agent:main:session-cache",
+      usage: { input: 350, output: 25, cacheRead: 21_443, total: 21_818 },
+      lastCallUsage: { input: 350, output: 25 },
+      promptTokens: 350,
+    });
+
+    expect(currentEntry.cacheRead).toBe(0);
+    expect(currentEntry.cacheWrite).toBe(0);
+    expect(logTokenUsageRecordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheRead: 0,
+        cacheWrite: 0,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("records live last-call cache usage for the current call", async () => {
+    await persistSessionUsageUpdate({
+      storePath: "/tmp/store",
+      sessionKey: "agent:main:session-cache",
+      usage: { input: 350, output: 25, cacheRead: 120, total: 495 },
+      lastCallUsage: { input: 350, output: 25, cacheRead: 120 },
+      promptTokens: 470,
+    });
+
+    expect(currentEntry.cacheRead).toBe(120);
+    expect(logTokenUsageRecordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheRead: 120,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("drops untrusted cacheRead that exceeds the call prompt size", async () => {
+    await persistSessionUsageUpdate({
+      storePath: "/tmp/store",
+      sessionKey: "agent:main:session-cache",
+      usage: { input: 120, output: 10, cacheRead: 21_443, total: 21_573 },
+      lastCallUsage: { input: 120, output: 10, cacheRead: 21_443 },
+      promptTokens: 120,
+    });
+
+    expect(currentEntry.cacheRead).toBe(0);
+    expect(logTokenUsageRecordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheRead: 0,
+      }),
+      expect.anything(),
+    );
+  });
+});

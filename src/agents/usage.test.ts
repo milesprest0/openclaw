@@ -5,6 +5,7 @@ import {
   deriveSessionTotalTokens,
   hasNonzeroUsage,
   normalizeUsage,
+  sanitizePerCallCacheUsage,
   toOpenAiChatCompletionsUsage,
 } from "./usage.js";
 
@@ -280,6 +281,18 @@ describe("derivePromptTokens", () => {
   it("returns undefined for empty usage", () => {
     const promptTokens = derivePromptTokens({});
     expect(promptTokens).toBeUndefined();
+  });
+
+  it("keeps context utilization prompt math non-inflated after dropping untrusted cacheRead", () => {
+    const safeLastCallUsage = sanitizePerCallCacheUsage({
+      usage: {
+        input: 120,
+        cacheRead: 21_443,
+      },
+      promptTokens: 120,
+    });
+    expect(derivePromptTokens(safeLastCallUsage)).toBe(120);
+    expect(deriveSessionTotalTokens({ usage: safeLastCallUsage })).toBe(120);
   });
 });
 

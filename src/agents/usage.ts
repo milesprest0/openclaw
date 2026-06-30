@@ -219,6 +219,36 @@ export function derivePromptTokens(usage?: {
   return sum > 0 ? sum : undefined;
 }
 
+export function sanitizePerCallCacheUsage(params: {
+  usage?: NormalizedUsage;
+  promptTokens?: number;
+  onDroppedCacheRead?: (details: { cacheRead: number; promptTokens: number }) => void;
+}): NormalizedUsage | undefined {
+  const usage = params.usage;
+  if (!usage) {
+    return undefined;
+  }
+  const cacheRead = usage.cacheRead ?? 0;
+  if (cacheRead <= 0) {
+    return usage;
+  }
+  const promptTokens =
+    typeof params.promptTokens === "number" && Number.isFinite(params.promptTokens)
+      ? Math.max(0, Math.trunc(params.promptTokens))
+      : derivePromptTokens(usage);
+  if (typeof promptTokens !== "number") {
+    return usage;
+  }
+  if (cacheRead <= promptTokens) {
+    return usage;
+  }
+  params.onDroppedCacheRead?.({ cacheRead, promptTokens });
+  return {
+    ...usage,
+    cacheRead: 0,
+  };
+}
+
 export function deriveContextPromptTokens(params: {
   lastCallUsage?: NormalizedUsage;
   promptTokens?: number;

@@ -1,6 +1,11 @@
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
-import { resolveFinalAssistantRawText, resolveFinalAssistantVisibleText } from "./helpers.js";
+import { createUsageAccumulator, mergeUsageIntoAccumulator } from "../usage-accumulator.js";
+import {
+  buildUsageAgentMetaFields,
+  resolveFinalAssistantRawText,
+  resolveFinalAssistantVisibleText,
+} from "./helpers.js";
 
 function makeAssistantMessage(
   content: AssistantMessage["content"],
@@ -71,5 +76,84 @@ describe("resolveFinalAssistantVisibleText", () => {
     ]);
 
     expect(resolveFinalAssistantRawText(lastAssistant)).toBe("<final>keep this</final>");
+  });
+});
+
+describe("buildUsageAgentMetaFields", () => {
+  it("does not carry cacheRead forward from the run accumulator", () => {
+    const usageAccumulator = createUsageAccumulator();
+    mergeUsageIntoAccumulator(usageAccumulator, {
+      input: 100,
+      output: 30,
+      cacheRead: 21_443,
+      total: 21_573,
+    });
+
+    const usageMeta = buildUsageAgentMetaFields({
+      usageAccumulator,
+      lastAssistantUsage: {
+        input: 40,
+        output: 10,
+      },
+      lastRunPromptUsage: {
+        input: 40,
+      },
+      lastTurnTotal: 50,
+    });
+
+    expect(usageMeta.lastCallUsage).toEqual({
+      input: 40,
+      output: 10,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+      total: undefined,
+    });
+  });
+
+  it("keeps live last-call cache usage when present", () => {
+    const usageMeta = buildUsageAgentMetaFields({
+      usageAccumulator: createUsageAccumulator(),
+      lastAssistantUsage: {
+        input: 300,
+        output: 50,
+        cacheRead: 120,
+      },
+      lastRunPromptUsage: {
+        input: 300,
+        cacheRead: 120,
+      },
+      lastTurnTotal: 470,
+    });
+
+    expect(usageMeta.lastCallUsage).toEqual({
+      input: 300,
+      output: 50,
+      cacheRead: 120,
+      cacheWrite: undefined,
+      total: undefined,
+    });
+  });
+
+  it("drops untrusted last-call cacheRead when it exceeds call prompt tokens", () => {
+    const usageMeta = buildUsageAgentMetaFields({
+      usageAccumulator: createUsageAccumulator(),
+      lastAssistantUsage: {
+        input: 20,
+        output: 5,
+        cacheRead: 21_443,
+      },
+      lastRunPromptUsage: {
+        input: 20,
+      },
+      lastTurnTotal: 21_468,
+    });
+
+    expect(usageMeta.lastCallUsage).toEqual({
+      input: 20,
+      output: 5,
+      cacheRead: 0,
+      cacheWrite: undefined,
+      total: undefined,
+    });
   });
 });
