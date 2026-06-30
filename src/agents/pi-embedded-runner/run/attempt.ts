@@ -338,7 +338,11 @@ import {
   shouldFlagCompactionTimeout,
 } from "./compaction-timeout.js";
 import {
+  HISTORY_FROZEN_WATERMARK_SESSION_KEY,
   applyContextBudgetGuard,
+  parseHistoryFrozenWatermark,
+} from "./context-budget.js";
+import {
   installHistoryImagePruneContextTransform,
   pruneProcessedHistoryImages,
 } from "./history-image-prune.js";
@@ -3139,6 +3143,21 @@ export async function runEmbeddedAttempt(
           const systemLen = systemPromptText?.length ?? 0;
           const promptLen = effectivePrompt.length;
           const contextTokenBudget = params.contextTokenBudget ?? DEFAULT_CONTEXT_TOKENS;
+          const frozenWatermarkStorePath = params.sessionKey
+            ? resolveStorePath(params.config?.session?.store, {
+                agentId: sessionAgentId,
+              })
+            : undefined;
+          const persistedHistoryFrozenWatermark =
+            frozenWatermarkStorePath && params.sessionKey
+              ? parseHistoryFrozenWatermark(
+                  (
+                    loadSessionStore(frozenWatermarkStorePath, { skipCache: true })[
+                      params.sessionKey
+                    ] as Record<string, unknown> | undefined
+                  )?.[HISTORY_FROZEN_WATERMARK_SESSION_KEY],
+                )
+              : undefined;
           const contextBudgetGuard = (() => {
             try {
               return applyContextBudgetGuard({
@@ -3149,6 +3168,7 @@ export async function runEmbeddedAttempt(
                 systemPrompt: systemPromptForHook,
                 prompt: promptForModel,
                 promptImages: imageResult.images,
+                persistedHistoryFrozenWatermark,
               });
             } catch (err) {
               log.warn(
@@ -3172,10 +3192,33 @@ export async function runEmbeddedAttempt(
                 digestedToolResults: 0,
                 keepRawTurns: 3,
                 oldToolResultMaxChars: 2_000,
+                historyFrozenWatermark: persistedHistoryFrozenWatermark,
                 applied: false,
               };
             }
           })();
+          if (
+            frozenWatermarkStorePath &&
+            params.sessionKey &&
+            typeof contextBudgetGuard.historyFrozenWatermark === "number" &&
+            contextBudgetGuard.historyFrozenWatermark > (persistedHistoryFrozenWatermark ?? 0)
+          ) {
+            await updateSessionStoreEntry({
+              storePath: frozenWatermarkStorePath,
+              sessionKey: params.sessionKey,
+              update: async (entry) => {
+                const previous = parseHistoryFrozenWatermark(
+                  (entry as Record<string, unknown>)[HISTORY_FROZEN_WATERMARK_SESSION_KEY],
+                );
+                if (contextBudgetGuard.historyFrozenWatermark! <= (previous ?? 0)) {
+                  return null;
+                }
+                return {
+                  [HISTORY_FROZEN_WATERMARK_SESSION_KEY]: contextBudgetGuard.historyFrozenWatermark,
+                } as Partial<typeof entry>;
+              },
+            });
+          }
           if (contextBudgetGuard.historyDigestEnabled) {
             emitTrustedDiagnosticEvent({
               type: "context.history.digested",

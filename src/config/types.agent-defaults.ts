@@ -552,6 +552,8 @@ export type AgentProjectContextOptimizationConfig = {
 export type AgentHistoryOptimizationConfig = {
   /** Digest old tool results before oldest-turn dropping (default: false). */
   digestOldToolResults?: boolean;
+  /** History digest mode: sliding (default), off, or absolute frozen watermark. */
+  freezeMode?: "off" | "sliding" | "frozen";
   /** Keep this many most-recent turns fully raw (default: 3). */
   keepRawTurns?: number;
   /** Per-digest cap for older tool-result text blocks (default: 2000). */

@@ -10,6 +10,8 @@ import {
 import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import { resolveAgentModelFallbackValues } from "../../config/model-input.js";
+import { resolveStorePath } from "../../config/sessions/paths.js";
+import { loadSessionStore, updateSessionStoreEntry } from "../../config/sessions/store.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   captureCompactionCheckpointSnapshotAsync,
@@ -143,7 +145,11 @@ import { readPiModelContextTokens } from "./model-context-tokens.js";
 import { buildModelAliasLines, resolveModelAsync } from "./model.js";
 import { sanitizeSessionHistory, validateReplayTurns } from "./replay-history.js";
 import { shouldUseOpenAIWebSocketTransport } from "./run/attempt.thread-helpers.js";
-import { applyContextBudgetGuard } from "./run/context-budget.js";
+import {
+  HISTORY_FROZEN_WATERMARK_SESSION_KEY,
+  applyContextBudgetGuard,
+  parseHistoryFrozenWatermark,
+} from "./run/context-budget.js";
 import { buildEmbeddedSandboxInfo } from "./sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
 import { resolveEmbeddedRunSkillEntries } from "./skills-runtime.js";
@@ -1158,12 +1164,50 @@ async function compactEmbeddedPiSessionDirectOnce(
                   : {}),
               })
             : truncated;
+          const frozenWatermarkStorePath = params.sessionKey
+            ? resolveStorePath(params.config?.session?.store, {
+                agentId: sessionAgentId,
+              })
+            : undefined;
+          const persistedHistoryFrozenWatermark =
+            frozenWatermarkStorePath && params.sessionKey
+              ? parseHistoryFrozenWatermark(
+                  (
+                    loadSessionStore(frozenWatermarkStorePath, { skipCache: true })[
+                      params.sessionKey
+                    ] as Record<string, unknown> | undefined
+                  )?.[HISTORY_FROZEN_WATERMARK_SESSION_KEY],
+                )
+              : undefined;
           const contextBudgetGuard = applyContextBudgetGuard({
             messages: limited,
             cfg: params.config,
             contextWindowTokens: ctxInfo.tokens,
             accountId: params.agentAccountId,
+            persistedHistoryFrozenWatermark,
           });
+          if (
+            frozenWatermarkStorePath &&
+            params.sessionKey &&
+            typeof contextBudgetGuard.historyFrozenWatermark === "number" &&
+            contextBudgetGuard.historyFrozenWatermark > (persistedHistoryFrozenWatermark ?? 0)
+          ) {
+            await updateSessionStoreEntry({
+              storePath: frozenWatermarkStorePath,
+              sessionKey: params.sessionKey,
+              update: async (entry) => {
+                const previous = parseHistoryFrozenWatermark(
+                  (entry as Record<string, unknown>)[HISTORY_FROZEN_WATERMARK_SESSION_KEY],
+                );
+                if (contextBudgetGuard.historyFrozenWatermark! <= (previous ?? 0)) {
+                  return null;
+                }
+                return {
+                  [HISTORY_FROZEN_WATERMARK_SESSION_KEY]: contextBudgetGuard.historyFrozenWatermark,
+                } as Partial<typeof entry>;
+              },
+            });
+          }
           if (contextBudgetGuard.applied) {
             log.info(
               `[context-budget] bounded compaction input sessionKey=${params.sessionKey ?? params.sessionId} ` +

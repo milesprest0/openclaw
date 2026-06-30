@@ -19,6 +19,9 @@ const DEFAULT_PER_THREAD_MAX_IMAGES = 8;
 const DEFAULT_RESERVE_TOKENS = 20_000;
 const DEFAULT_HISTORY_KEEP_RAW_TURNS = 3;
 const DEFAULT_OLD_TOOL_RESULT_MAX_CHARS = 2_000;
+const DEFAULT_HISTORY_FREEZE_MODE = "sliding";
+
+export const HISTORY_FROZEN_WATERMARK_SESSION_KEY = "openclaw.history-frozen-watermark";
 
 export const CONTEXT_BUDGET_IMAGE_PLACEHOLDER = "[image data removed - context budget image cap]";
 
@@ -57,6 +60,7 @@ export type ContextBudgetGuardResult = {
   digestedToolResults: number;
   keepRawTurns: number;
   oldToolResultMaxChars: number;
+  historyFrozenWatermark?: number;
   applied: boolean;
 };
 
@@ -64,6 +68,7 @@ type ResolvedHistoryOptimization = {
   digestOldToolResults: boolean;
   keepRawTurns: number;
   oldToolResultMaxChars: number;
+  freezeMode: "off" | "sliding" | "frozen";
 };
 
 type HistoryDigestStats = {
@@ -71,7 +76,15 @@ type HistoryDigestStats = {
   beforeChars: number;
   afterChars: number;
   digestedToolResults: number;
+  frozenWatermark?: number;
 };
+
+function normalizeHistoryFreezeMode(value: unknown): "off" | "sliding" | "frozen" {
+  if (value === "off" || value === "sliding" || value === "frozen") {
+    return value;
+  }
+  return DEFAULT_HISTORY_FREEZE_MODE;
+}
 
 function normalizePositiveInt(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -99,7 +112,16 @@ function resolveHistoryOptimization(cfg?: OpenClawConfig): ResolvedHistoryOptimi
     oldToolResultMaxChars:
       normalizePositiveInt(optimization?.oldToolResultMaxChars) ??
       DEFAULT_OLD_TOOL_RESULT_MAX_CHARS,
+    freezeMode: normalizeHistoryFreezeMode(optimization?.freezeMode),
   };
+}
+
+function readFrozenWatermark(value: unknown): number {
+  return normalizeNonNegativeInt(value) ?? 0;
+}
+
+export function parseHistoryFrozenWatermark(value: unknown): number | undefined {
+  return normalizeNonNegativeInt(value);
 }
 
 function getMessageText(content: unknown): string {
@@ -205,14 +227,41 @@ function resolveDigestCutoffIndex(messages: AgentMessage[], keepRawTurns: number
 
 function digestOldToolResultsWithStats(
   messages: AgentMessage[],
-  opts: { keepRawTurns: number; oldToolResultMaxChars: number },
+  opts: {
+    keepRawTurns: number;
+    oldToolResultMaxChars: number;
+    freezeMode: "off" | "sliding" | "frozen";
+    persistedFrozenWatermark?: number;
+  },
 ): HistoryDigestStats {
   if (messages.length === 0) {
-    return { messages, beforeChars: 0, afterChars: 0, digestedToolResults: 0 };
+    return {
+      messages,
+      beforeChars: 0,
+      afterChars: 0,
+      digestedToolResults: 0,
+      ...(opts.freezeMode === "frozen"
+        ? { frozenWatermark: readFrozenWatermark(opts.persistedFrozenWatermark) }
+        : {}),
+    };
   }
-  const cutoffIndex = resolveDigestCutoffIndex(messages, opts.keepRawTurns);
+  const slidingCutoffIndex = resolveDigestCutoffIndex(messages, opts.keepRawTurns);
+  const frozenWatermark =
+    opts.freezeMode === "frozen"
+      ? Math.max(readFrozenWatermark(opts.persistedFrozenWatermark), slidingCutoffIndex)
+      : undefined;
+  const cutoffIndex =
+    opts.freezeMode === "frozen"
+      ? Math.min(messages.length, frozenWatermark ?? 0)
+      : slidingCutoffIndex;
   if (cutoffIndex <= 0) {
-    return { messages, beforeChars: 0, afterChars: 0, digestedToolResults: 0 };
+    return {
+      messages,
+      beforeChars: 0,
+      afterChars: 0,
+      digestedToolResults: 0,
+      ...(opts.freezeMode === "frozen" ? { frozenWatermark } : {}),
+    };
   }
 
   let nextMessages: AgentMessage[] | undefined;
@@ -226,6 +275,9 @@ function digestOldToolResultsWithStats(
       continue;
     }
     if ((message as { role?: unknown }).role === "toolResult") {
+      if (opts.freezeMode === "frozen" && (message as { frozen?: unknown }).frozen === true) {
+        continue;
+      }
       const text = getMessageText((message as { content?: unknown }).content);
       if (!text) {
         continue;
@@ -243,6 +295,7 @@ function digestOldToolResultsWithStats(
       nextMessages[i] = {
         ...message,
         content: [{ type: "text", text: digestText }],
+        ...(opts.freezeMode === "frozen" ? { frozen: true } : {}),
       } as AgentMessage;
       continue;
     }
@@ -263,6 +316,9 @@ function digestOldToolResultsWithStats(
         blockType !== "tool-result" &&
         blockType !== "toolResult"
       ) {
+        continue;
+      }
+      if (opts.freezeMode === "frozen" && (block as { frozen?: unknown }).frozen === true) {
         continue;
       }
       const rawText = (() => {
@@ -286,7 +342,10 @@ function digestOldToolResultsWithStats(
       afterChars += digestText.length;
       digestedToolResults += 1;
       nextContent ??= content.slice();
-      nextContent[blockIndex] = { type: "text", text: digestText };
+      nextContent[blockIndex] =
+        opts.freezeMode === "frozen"
+          ? { type: "text", text: digestText, frozen: true }
+          : { type: "text", text: digestText };
     }
     if (!nextContent) {
       continue;
@@ -300,6 +359,7 @@ function digestOldToolResultsWithStats(
     beforeChars,
     afterChars,
     digestedToolResults,
+    ...(opts.freezeMode === "frozen" ? { frozenWatermark } : {}),
   };
 }
 
@@ -307,7 +367,10 @@ export function digestOldToolResults(
   messages: AgentMessage[],
   opts: { keepRawTurns: number; oldToolResultMaxChars: number },
 ): AgentMessage[] {
-  return digestOldToolResultsWithStats(messages, opts).messages;
+  return digestOldToolResultsWithStats(messages, {
+    ...opts,
+    freezeMode: "sliding",
+  }).messages;
 }
 
 function normalizeTargetBand(value: AgentContextBudgetTargetBandConfig | undefined):
@@ -521,6 +584,7 @@ export function applyContextBudgetGuard(params: {
   systemPrompt?: string;
   prompt?: string;
   promptImages?: readonly PromptInlineImage[];
+  persistedHistoryFrozenWatermark?: number;
 }): ContextBudgetGuardResult {
   const budget = resolveContextBudget({
     cfg: params.cfg,
@@ -540,12 +604,15 @@ export function applyContextBudgetGuard(params: {
     ? digestOldToolResultsWithStats(currentMessages, {
         keepRawTurns: historyOptimization.keepRawTurns,
         oldToolResultMaxChars: historyOptimization.oldToolResultMaxChars,
+        freezeMode: historyOptimization.freezeMode,
+        persistedFrozenWatermark: params.persistedHistoryFrozenWatermark,
       })
     : {
         messages: currentMessages,
         beforeChars: 0,
         afterChars: 0,
         digestedToolResults: 0,
+        frozenWatermark: undefined,
       };
   currentMessages = digested.messages;
   let estimatedTokens = estimateAssembledTokens({
@@ -571,6 +638,7 @@ export function applyContextBudgetGuard(params: {
       digestedToolResults: digested.digestedToolResults,
       keepRawTurns: historyOptimization.keepRawTurns,
       oldToolResultMaxChars: historyOptimization.oldToolResultMaxChars,
+      historyFrozenWatermark: digested.frozenWatermark,
       applied: aged.prunedCount > 0 || digested.digestedToolResults > 0,
     };
   }
@@ -617,6 +685,7 @@ export function applyContextBudgetGuard(params: {
     digestedToolResults: digested.digestedToolResults,
     keepRawTurns: historyOptimization.keepRawTurns,
     oldToolResultMaxChars: historyOptimization.oldToolResultMaxChars,
+    historyFrozenWatermark: digested.frozenWatermark,
     applied: aged.prunedCount > 0 || droppedTurns > 0 || digested.digestedToolResults > 0,
   };
 }

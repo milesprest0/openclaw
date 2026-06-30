@@ -279,6 +279,7 @@ export const AgentDefaultsSchema = z
     historyOptimization: z
       .object({
         digestOldToolResults: z.boolean().optional(),
+        freezeMode: z.enum(["off", "sliding", "frozen"]).default("sliding"),
         keepRawTurns: z.number().int().nonnegative().optional(),
         oldToolResultMaxChars: z.number().int().positive().optional(),
       })
