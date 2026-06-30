@@ -20,6 +20,25 @@ function makeToolResult(content: string, toolName = "read"): AgentMessage {
   } as AgentMessage;
 }
 
+function makeAssistantToolUse(params: {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}): AgentMessage {
+  return {
+    role: "assistant",
+    content: [
+      {
+        type: "tool_use",
+        id: params.id,
+        name: params.name,
+        input: params.input,
+      },
+    ],
+    timestamp: 0,
+  } as AgentMessage;
+}
+
 function toolText(message: AgentMessage): string {
   const content = (message as { content?: unknown }).content;
   if (!Array.isArray(content)) {
@@ -27,6 +46,15 @@ function toolText(message: AgentMessage): string {
   }
   const first = content[0] as { text?: string } | undefined;
   return typeof first?.text === "string" ? first.text : "";
+}
+
+function firstBlockInput(message: AgentMessage): unknown {
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const first = content[0] as { input?: unknown } | undefined;
+  return first?.input;
 }
 
 describe("context-budget history digest", () => {
@@ -106,6 +134,74 @@ describe("context-budget history digest", () => {
     expect(result.historyDigestEnabled).toBe(true);
     expect(result.historyDigested).toBe(true);
     expect(result.digestedToolResults).toBeGreaterThan(0);
+  });
+
+  it("keeps assistant tool_call args byte-identical when compactToolCallArgs is off", () => {
+    const messages: AgentMessage[] = [
+      makeUser("turn-1"),
+      makeAssistantToolUse({
+        id: "call-read-1",
+        name: "read",
+        input: {
+          path: "/var/tmp/reports/case-9931.log",
+          case: "CASE-848393",
+          url: "https://api.example.com/items/848393",
+        },
+      }),
+      makeToolResult("tool output alpha", "read"),
+      makeUser("turn-2"),
+      makeAssistant("ack"),
+    ];
+
+    const run = (freezeMode: "off" | "sliding" | "frozen", compactToolCallArgs?: boolean) =>
+      applyContextBudgetGuard({
+        messages,
+        cfg: {
+          agents: {
+            defaults: {
+              historyOptimization: {
+                digestOldToolResults: true,
+                freezeMode,
+                keepRawTurns: 1,
+                oldToolResultMaxChars: 180,
+                ...(compactToolCallArgs === undefined ? {} : { compactToolCallArgs }),
+              },
+              contextBudget: {
+                enabled: true,
+                maxAssembledTokens: 500_000,
+                reserveTokens: 1,
+              },
+            },
+          },
+        },
+        contextWindowTokens: 500_000,
+      });
+
+    const offDefault = run("off");
+    const offFalse = run("off", false);
+    const slidingDefault = run("sliding");
+    const slidingFalse = run("sliding", false);
+    const frozenDefault = run("frozen");
+    const frozenFalse = run("frozen", false);
+
+    expect(JSON.stringify(offFalse.messages)).toBe(JSON.stringify(offDefault.messages));
+    expect(JSON.stringify(slidingFalse.messages)).toBe(JSON.stringify(slidingDefault.messages));
+    expect(JSON.stringify(frozenFalse.messages)).toBe(JSON.stringify(frozenDefault.messages));
+
+    const toolUseOff = (
+      (offDefault.messages[1] as { content?: unknown }).content as Array<Record<string, unknown>>
+    )[0];
+    const toolUseSliding = (
+      (slidingDefault.messages[1] as { content?: unknown }).content as Array<
+        Record<string, unknown>
+      >
+    )[0];
+    const toolUseFrozen = (
+      (frozenDefault.messages[1] as { content?: unknown }).content as Array<Record<string, unknown>>
+    )[0];
+    expect(toolUseOff.input).toEqual(firstBlockInput(messages[1]));
+    expect(toolUseSliding.input).toEqual(toolUseOff.input);
+    expect(toolUseFrozen.input).toEqual(toolUseOff.input);
   });
 
   it("keeps most recent N turns raw", () => {

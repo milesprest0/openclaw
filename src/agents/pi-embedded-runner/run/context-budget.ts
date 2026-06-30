@@ -69,6 +69,7 @@ type ResolvedHistoryOptimization = {
   keepRawTurns: number;
   oldToolResultMaxChars: number;
   freezeMode: "off" | "sliding" | "frozen";
+  compactToolCallArgs: boolean;
 };
 
 type HistoryDigestStats = {
@@ -113,6 +114,7 @@ function resolveHistoryOptimization(cfg?: OpenClawConfig): ResolvedHistoryOptimi
       normalizePositiveInt(optimization?.oldToolResultMaxChars) ??
       DEFAULT_OLD_TOOL_RESULT_MAX_CHARS,
     freezeMode: normalizeHistoryFreezeMode(optimization?.freezeMode),
+    compactToolCallArgs: optimization?.compactToolCallArgs === true,
   };
 }
 
@@ -203,6 +205,37 @@ function digestToolResultText(params: {
   });
 }
 
+function digestToolCallArgs(params: {
+  input: unknown;
+  toolName?: string;
+  toolCallId?: string;
+  maxChars: number;
+}): { name: string; argsHash: string; idsPreserved: string[]; keyArgs?: string } {
+  const raw = JSON.stringify(params.input) ?? "";
+  const compact = raw.replace(/\s+/gu, " ").trim();
+  const idsPreserved = collectIdentifiers(raw);
+  const argsHash = createHash("sha1")
+    .update(params.toolCallId ?? raw)
+    .digest("hex")
+    .slice(0, 10);
+  const keyArgs = truncateToolResultText(compact, Math.max(120, Math.floor(params.maxChars * 0.5)));
+  const digest = {
+    name: params.toolName ?? "unknown",
+    argsHash,
+    idsPreserved,
+    keyArgs,
+  };
+  const rendered = JSON.stringify(digest);
+  if (rendered.length <= params.maxChars) {
+    return digest;
+  }
+  return {
+    name: digest.name,
+    argsHash: digest.argsHash,
+    idsPreserved: digest.idsPreserved,
+  };
+}
+
 function resolveDigestCutoffIndex(messages: AgentMessage[], keepRawTurns: number): number {
   const userIndexes: number[] = [];
   for (let i = 0; i < messages.length; i += 1) {
@@ -232,6 +265,7 @@ function digestOldToolResultsWithStats(
     oldToolResultMaxChars: number;
     freezeMode: "off" | "sliding" | "frozen";
     persistedFrozenWatermark?: number;
+    compactToolCallArgs: boolean;
   },
 ): HistoryDigestStats {
   if (messages.length === 0) {
@@ -312,6 +346,39 @@ function digestOldToolResultsWithStats(
       }
       const blockType = (block as { type?: unknown }).type;
       if (
+        (blockType === "tool_use" || blockType === "toolCall") &&
+        opts.freezeMode === "frozen" &&
+        opts.compactToolCallArgs === true
+      ) {
+        if ((block as { frozen?: unknown }).frozen === true) {
+          continue;
+        }
+        const input = (block as { input?: unknown }).input;
+        if (!input || typeof input !== "object") {
+          continue;
+        }
+        const rawInput = JSON.stringify(input) ?? "";
+        if (!rawInput || rawInput === "{}" || rawInput === "[]") {
+          continue;
+        }
+        const digestInput = digestToolCallArgs({
+          input,
+          toolName: (block as { name?: unknown }).name as string | undefined,
+          toolCallId: (block as { id?: unknown }).id as string | undefined,
+          maxChars: opts.oldToolResultMaxChars,
+        });
+        const digestInputText = JSON.stringify(digestInput) ?? "";
+        beforeChars += rawInput.length;
+        afterChars += digestInputText.length;
+        nextContent ??= content.slice();
+        nextContent[blockIndex] = {
+          ...block,
+          input: digestInput,
+          frozen: true,
+        };
+        continue;
+      }
+      if (
         blockType !== "tool_result" &&
         blockType !== "tool-result" &&
         blockType !== "toolResult"
@@ -370,6 +437,7 @@ export function digestOldToolResults(
   return digestOldToolResultsWithStats(messages, {
     ...opts,
     freezeMode: "sliding",
+    compactToolCallArgs: false,
   }).messages;
 }
 
@@ -606,6 +674,7 @@ export function applyContextBudgetGuard(params: {
         oldToolResultMaxChars: historyOptimization.oldToolResultMaxChars,
         freezeMode: historyOptimization.freezeMode,
         persistedFrozenWatermark: params.persistedHistoryFrozenWatermark,
+        compactToolCallArgs: historyOptimization.compactToolCallArgs,
       })
     : {
         messages: currentMessages,
