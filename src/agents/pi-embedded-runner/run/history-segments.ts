@@ -11,7 +11,7 @@ function normalizeNonNegativeInt(value: unknown): number {
     return 0;
   }
   const next = Math.floor(value);
-  return next >= 0 ? next : 0;
+  return Math.max(next, 0);
 }
 
 function resolveLiveStartIndex(messages: AgentMessage[], warmTurns: number): number {
@@ -40,7 +40,7 @@ function isFrozenMessage(message: AgentMessage | undefined, frozenMarkerKey: str
   if (!message || !frozenMarkerKey) {
     return false;
   }
-  const value = (message as Record<string, unknown>)[frozenMarkerKey];
+  const value = (message as unknown as Record<string, unknown>)[frozenMarkerKey];
   return value === true;
 }
 
