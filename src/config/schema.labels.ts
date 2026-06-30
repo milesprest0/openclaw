@@ -400,6 +400,8 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.bootstrapTotalMaxChars": "Bootstrap Total Max Chars",
   "agents.defaults.experimental": "Experimental Agent Flags",
   "agents.defaults.experimental.localModelLean": "Enable Lean Local Model Mode (Experimental)",
+  "agents.defaults.experimental.historyCacheBreakpoints":
+    "Anthropic History Cache Breakpoints (Experimental)",
   "agents.defaults.experimental.openRouterGoogleCache":
     "OpenRouter Gemini Prompt Caching (Experimental)",
   "agents.defaults.bootstrapPromptTruncationWarning": "Bootstrap Prompt Truncation Warning",

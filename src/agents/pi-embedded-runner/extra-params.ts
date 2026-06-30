@@ -11,6 +11,7 @@ import {
   wrapProviderStreamFn as wrapProviderStreamFnRuntime,
 } from "../../plugins/provider-hook-runtime.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
+import type { AnthropicHistoryCacheBreakpointsMode } from "../anthropic-payload-policy.js";
 import { legacyModelKey, modelKey } from "../model-selection-normalize.js";
 import { supportsGptParallelToolCallsPayload } from "../provider-api-families.js";
 import { resolveProviderRequestPolicyConfig } from "../provider-request-config.js";
@@ -696,9 +697,30 @@ function normalizeExplicitCacheRetention(value: unknown): "none" | "short" | "lo
   return value === "none" || value === "short" || value === "long" ? value : undefined;
 }
 
+function normalizeHistoryCacheBreakpoints(
+  value: unknown,
+): AnthropicHistoryCacheBreakpointsMode | undefined {
+  return value === "off" || value === "shadow" || value === "on" ? value : undefined;
+}
+
+function createAnthropicHistoryCacheBreakpointsWrapper(
+  baseStreamFn: StreamFn | undefined,
+  mode: AnthropicHistoryCacheBreakpointsMode,
+): StreamFn {
+  const underlying = baseStreamFn ?? streamSimple;
+  return (model, context, options) =>
+    underlying(model, context, {
+      ...(options ?? {}),
+      historyCacheBreakpoints: mode,
+    } as typeof options & { historyCacheBreakpoints: AnthropicHistoryCacheBreakpointsMode });
+}
+
 function applyPostPluginStreamWrappers(
   ctx: ApplyExtraParamsContext & { providerWrapperHandled: boolean },
 ): void {
+  const historyCacheBreakpoints = normalizeHistoryCacheBreakpoints(
+    ctx.cfg?.agents?.defaults?.experimental?.historyCacheBreakpoints,
+  );
   ctx.agent.streamFn = createOpenRouterSystemCacheWrapper(ctx.agent.streamFn, {
     // Phase 2 (TTL alignment): thread the explicit cache retention into the
     // OpenRouter marker wrapper so high-prefix / long-session surfaces can opt
@@ -713,7 +735,14 @@ function applyPostPluginStreamWrappers(
     // implicit prefix caching). Gated OFF by default; flip on per-fleet after
     // canary. Anthropic path is unaffected. (2026-06-29)
     googleMarkers: ctx.cfg?.agents?.defaults?.experimental?.openRouterGoogleCache === "on",
+    historyCacheBreakpoints,
   });
+  if (historyCacheBreakpoints) {
+    ctx.agent.streamFn = createAnthropicHistoryCacheBreakpointsWrapper(
+      ctx.agent.streamFn,
+      historyCacheBreakpoints,
+    );
+  }
   ctx.agent.streamFn = createOpenAIStringContentWrapper(ctx.agent.streamFn);
   ctx.agent.streamFn = createOpenAICompletionsToolsCompatWrapper(ctx.agent.streamFn);
 

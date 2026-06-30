@@ -268,6 +268,13 @@ export type AgentDefaultsConfig = {
      */
     thinkingEviction?: "off" | "shadow" | "on";
     /**
+     * Phase 2a history cache breakpoints for Anthropic-family marker paths.
+     * - "off" (default): no history breakpoint markers.
+     * - "shadow": compute/report candidate frozen+warm indices only; keep payload bytes unchanged.
+     * - "on": emit [3]/[4] history breakpoints when frozen tags are present.
+     */
+    historyCacheBreakpoints?: "off" | "shadow" | "on";
+    /**
      * Stamp OpenRouter cache_control markers on OpenRouter-routed Google/Gemini
      * models (gemini-2.5 / gemini-3 family). Gemini performs no implicit prefix
      * caching over OpenRouter, so without markers a stable system prefix is

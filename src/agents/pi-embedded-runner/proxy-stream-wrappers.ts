@@ -2,6 +2,7 @@ import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import { normalizeOptionalLowercaseString, readStringValue } from "../../shared/string-coerce.js";
+import type { AnthropicHistoryCacheBreakpointsMode } from "../anthropic-payload-policy.js";
 import { resolveProviderRequestPolicy } from "../provider-attribution.js";
 import { resolveProviderRequestPolicyConfig } from "../provider-request-config.js";
 import { applyAnthropicEphemeralCacheControlMarkers } from "./anthropic-cache-control-payload.js";
@@ -169,6 +170,7 @@ export type OpenRouterSystemCacheWrapperOptions = {
    * (2026-06-29, verified via live cold/warm probe.)
    */
   googleMarkers?: boolean;
+  historyCacheBreakpoints?: AnthropicHistoryCacheBreakpointsMode;
 };
 
 /**
@@ -198,7 +200,14 @@ export function createOpenRouterSystemCacheWrapper(
   const underlying = baseStreamFn ?? streamSimple;
   const retention = resolveOpenRouterCacheRetention(wrapperOptions);
   const googleMarkers = wrapperOptions?.googleMarkers === true;
-  const markerOptions = retention === "long" ? ({ ttl: "1h" } as const) : undefined;
+  const historyCacheBreakpoints = wrapperOptions?.historyCacheBreakpoints;
+  const markerOptions =
+    retention === "long" || historyCacheBreakpoints
+      ? {
+          ...(retention === "long" ? ({ ttl: "1h" } as const) : {}),
+          ...(historyCacheBreakpoints ? { historyBreakpoints: historyCacheBreakpoints } : {}),
+        }
+      : undefined;
   return (model, context, options) => {
     const provider = readStringValue(model.provider);
     const modelId = readStringValue(model.id);
