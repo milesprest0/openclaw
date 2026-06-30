@@ -668,6 +668,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.historyOptimization": "History Optimization",
   "agents.defaults.historyOptimization.digestOldToolResults":
     "History Optimization Digest Old Tool Results",
+  "agents.defaults.historyOptimization.freezeMode": "History Optimization Freeze Mode",
   "agents.defaults.historyOptimization.keepRawTurns": "History Optimization Keep Raw Turns",
   "agents.defaults.historyOptimization.oldToolResultMaxChars":
     "History Optimization Old Tool Result Max Chars",

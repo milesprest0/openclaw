@@ -45,8 +45,12 @@ function fallbackThatRequiresReplyToAll(args: {
   toolContext?: { currentThreadTs?: string; replyToMode?: string };
 }): string | undefined {
   const ctx = args.toolContext;
-  if (!ctx?.currentThreadTs) return undefined;
-  if (ctx.replyToMode !== "all" && ctx.replyToMode !== "first") return undefined;
+  if (!ctx?.currentThreadTs) {
+    return undefined;
+  }
+  if (ctx.replyToMode !== "all" && ctx.replyToMode !== "first") {
+    return undefined;
+  }
   return ctx.currentThreadTs;
 }
 

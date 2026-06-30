@@ -308,12 +308,14 @@ describe("agent defaults schema", () => {
     const defaults = AgentDefaultsSchema.parse({
       historyOptimization: {
         digestOldToolResults: true,
+        freezeMode: "frozen",
         keepRawTurns: 4,
         oldToolResultMaxChars: 1800,
       },
     })!;
 
     expect(defaults.historyOptimization?.digestOldToolResults).toBe(true);
+    expect(defaults.historyOptimization?.freezeMode).toBe("frozen");
     expect(defaults.historyOptimization?.keepRawTurns).toBe(4);
     expect(defaults.historyOptimization?.oldToolResultMaxChars).toBe(1800);
   });
@@ -321,6 +323,7 @@ describe("agent defaults schema", () => {
   it("round-trips historyOptimization and resolves default-off/defaults", () => {
     const parsedDefaults = AgentDefaultsSchema.parse({})!;
     expect(parsedDefaults.historyOptimization?.digestOldToolResults ?? false).toBe(false);
+    expect(parsedDefaults.historyOptimization?.freezeMode ?? "sliding").toBe("sliding");
     expect(parsedDefaults.historyOptimization?.keepRawTurns ?? 3).toBe(3);
     expect(parsedDefaults.historyOptimization?.oldToolResultMaxChars ?? 2_000).toBe(2_000);
 
@@ -329,6 +332,7 @@ describe("agent defaults schema", () => {
         defaults: {
           historyOptimization: {
             digestOldToolResults: true,
+            freezeMode: "sliding",
             keepRawTurns: 2,
             oldToolResultMaxChars: 1600,
           },
@@ -342,6 +346,7 @@ describe("agent defaults schema", () => {
           defaults: {
             historyOptimization: {
               digestOldToolResults: true,
+              freezeMode: "sliding",
               keepRawTurns: 2,
               oldToolResultMaxChars: 1600,
             },

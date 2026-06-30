@@ -743,6 +743,7 @@ describe("openai transport stream", () => {
       api: model.api,
       provider: model.provider,
       model: model.id,
+      servedModel: undefined as string | undefined,
       usage: {
         input: 0,
         output: 0,
