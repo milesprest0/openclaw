@@ -1434,6 +1434,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Digest old tool-result blocks before oldest-turn dropping in the context budget guard (default: false).",
   "agents.defaults.historyOptimization.freezeMode":
     'History digest anchoring mode: "sliding" (default) preserves current behavior, "off" behaves like sliding in Phase 0, and "frozen" anchors digesting to a persisted absolute watermark.',
+  "agents.defaults.historyOptimization.compactToolCallArgs":
+    'Deterministically compact frozen assistant tool-call arguments into a digest object (default: false). Only applies when freezeMode is "frozen".',
   "agents.defaults.historyOptimization.keepRawTurns":
     "Number of most-recent turns to keep fully raw when old-tool-result digesting is enabled (default: 3).",
   "agents.defaults.historyOptimization.oldToolResultMaxChars":

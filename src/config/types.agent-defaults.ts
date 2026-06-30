@@ -554,6 +554,8 @@ export type AgentHistoryOptimizationConfig = {
   digestOldToolResults?: boolean;
   /** History digest mode: sliding (default), off, or absolute frozen watermark. */
   freezeMode?: "off" | "sliding" | "frozen";
+  /** Deterministically compact frozen assistant tool-call args (default: false; requires freezeMode="frozen"). */
+  compactToolCallArgs?: boolean;
   /** Keep this many most-recent turns fully raw (default: 3). */
   keepRawTurns?: number;
   /** Per-digest cap for older tool-result text blocks (default: 2000). */

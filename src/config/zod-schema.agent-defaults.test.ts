@@ -309,6 +309,7 @@ describe("agent defaults schema", () => {
       historyOptimization: {
         digestOldToolResults: true,
         freezeMode: "frozen",
+        compactToolCallArgs: true,
         keepRawTurns: 4,
         oldToolResultMaxChars: 1800,
       },
@@ -316,6 +317,7 @@ describe("agent defaults schema", () => {
 
     expect(defaults.historyOptimization?.digestOldToolResults).toBe(true);
     expect(defaults.historyOptimization?.freezeMode).toBe("frozen");
+    expect(defaults.historyOptimization?.compactToolCallArgs).toBe(true);
     expect(defaults.historyOptimization?.keepRawTurns).toBe(4);
     expect(defaults.historyOptimization?.oldToolResultMaxChars).toBe(1800);
   });
@@ -324,6 +326,7 @@ describe("agent defaults schema", () => {
     const parsedDefaults = AgentDefaultsSchema.parse({})!;
     expect(parsedDefaults.historyOptimization?.digestOldToolResults ?? false).toBe(false);
     expect(parsedDefaults.historyOptimization?.freezeMode ?? "sliding").toBe("sliding");
+    expect(parsedDefaults.historyOptimization?.compactToolCallArgs ?? false).toBe(false);
     expect(parsedDefaults.historyOptimization?.keepRawTurns ?? 3).toBe(3);
     expect(parsedDefaults.historyOptimization?.oldToolResultMaxChars ?? 2_000).toBe(2_000);
 
@@ -333,6 +336,7 @@ describe("agent defaults schema", () => {
           historyOptimization: {
             digestOldToolResults: true,
             freezeMode: "sliding",
+            compactToolCallArgs: true,
             keepRawTurns: 2,
             oldToolResultMaxChars: 1600,
           },
@@ -347,6 +351,7 @@ describe("agent defaults schema", () => {
             historyOptimization: {
               digestOldToolResults: true,
               freezeMode: "sliding",
+              compactToolCallArgs: true,
               keepRawTurns: 2,
               oldToolResultMaxChars: 1600,
             },
