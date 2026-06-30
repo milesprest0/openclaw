@@ -10,6 +10,7 @@ import type {
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { normalizeOptionalAccountId } from "../../../routing/session-key.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
+import type { AnthropicHistoryCacheBreakpointsMode } from "../../anthropic-payload-policy.js";
 import { SAFETY_MARGIN, estimateMessagesTokens } from "../../compaction.js";
 import { log } from "../logger.js";
 import { truncateToolResultText } from "../tool-result-truncation.js";
@@ -22,6 +23,7 @@ const DEFAULT_OLD_TOOL_RESULT_MAX_CHARS = 2_000;
 const DEFAULT_HISTORY_FREEZE_MODE = "sliding";
 
 export const HISTORY_FROZEN_WATERMARK_SESSION_KEY = "openclaw.history-frozen-watermark";
+export const HISTORY_FROZEN_BOUNDARY_SENTINEL = "\n<!-- OPENCLAW_HISTORY_FROZEN_BOUNDARY -->\n";
 
 export const CONTEXT_BUDGET_IMAGE_PLACEHOLDER = "[image data removed - context budget image cap]";
 
@@ -85,6 +87,115 @@ function normalizeHistoryFreezeMode(value: unknown): "off" | "sliding" | "frozen
     return value;
   }
   return DEFAULT_HISTORY_FREEZE_MODE;
+}
+
+function normalizeHistoryCacheBreakpoints(
+  value: unknown,
+): AnthropicHistoryCacheBreakpointsMode | undefined {
+  return value === "off" || value === "shadow" || value === "on" ? value : undefined;
+}
+
+function messageHasFrozenContentBlock(message: AgentMessage): boolean {
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some(
+    (block) =>
+      block && typeof block === "object" && (block as { frozen?: unknown }).frozen === true,
+  );
+}
+
+function resolveLastFrozenMessageIndex(messages: AgentMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message) {
+      continue;
+    }
+    if (
+      (message as { frozen?: unknown }).frozen === true ||
+      messageHasFrozenContentBlock(message)
+    ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+export function appendHistoryFrozenSentinel(
+  messages: AgentMessage[],
+  mode: AnthropicHistoryCacheBreakpointsMode | undefined,
+  freezeMode: "off" | "sliding" | "frozen",
+): AgentMessage[] {
+  if (mode !== "on" || freezeMode !== "frozen" || messages.length === 0) {
+    return messages;
+  }
+  const boundaryIndex = resolveLastFrozenMessageIndex(messages);
+  if (boundaryIndex < 0) {
+    return messages;
+  }
+  const boundary = messages[boundaryIndex];
+  if (!boundary) {
+    return messages;
+  }
+
+  const content = (boundary as { content?: unknown }).content;
+  if (typeof content === "string") {
+    if (content.endsWith(HISTORY_FROZEN_BOUNDARY_SENTINEL)) {
+      return messages;
+    }
+    const nextMessages = messages.slice();
+    nextMessages[boundaryIndex] = {
+      ...boundary,
+      content: `${content}${HISTORY_FROZEN_BOUNDARY_SENTINEL}`,
+    } as AgentMessage;
+    return nextMessages;
+  }
+
+  if (!Array.isArray(content)) {
+    const nextMessages = messages.slice();
+    nextMessages[boundaryIndex] = {
+      ...boundary,
+      content: [{ type: "text", text: HISTORY_FROZEN_BOUNDARY_SENTINEL }],
+    } as AgentMessage;
+    return nextMessages;
+  }
+
+  let lastTextBlockIndex = -1;
+  for (let i = content.length - 1; i >= 0; i -= 1) {
+    const block = content[i];
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const blockType = (block as { type?: unknown }).type;
+    const text = (block as { text?: unknown }).text;
+    if (blockType !== "text" || typeof text !== "string") {
+      continue;
+    }
+    lastTextBlockIndex = i;
+    break;
+  }
+
+  const nextContent = content.slice();
+  if (lastTextBlockIndex >= 0) {
+    const lastTextBlock = content[lastTextBlockIndex] as { text: string } & Record<string, unknown>;
+    if (lastTextBlock.text.endsWith(HISTORY_FROZEN_BOUNDARY_SENTINEL)) {
+      return messages;
+    }
+    nextContent[lastTextBlockIndex] = {
+      ...lastTextBlock,
+      text: `${lastTextBlock.text}${HISTORY_FROZEN_BOUNDARY_SENTINEL}`,
+    };
+  } else {
+    nextContent.push({ type: "text", text: HISTORY_FROZEN_BOUNDARY_SENTINEL });
+  }
+
+  const nextMessages = messages.slice();
+  nextMessages[boundaryIndex] = {
+    ...boundary,
+    content: nextContent,
+  } as AgentMessage;
+  return nextMessages;
 }
 
 function normalizePositiveInt(value: unknown): number | undefined {
@@ -684,6 +795,14 @@ export function applyContextBudgetGuard(params: {
         frozenWatermark: undefined,
       };
   currentMessages = digested.messages;
+  const historyCacheBreakpoints = normalizeHistoryCacheBreakpoints(
+    params.cfg?.agents?.defaults?.experimental?.historyCacheBreakpoints,
+  );
+  currentMessages = appendHistoryFrozenSentinel(
+    currentMessages,
+    historyCacheBreakpoints,
+    historyOptimization.freezeMode,
+  );
   let estimatedTokens = estimateAssembledTokens({
     messages: currentMessages,
     systemPrompt: params.systemPrompt,
