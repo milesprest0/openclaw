@@ -4,11 +4,11 @@ import { applyContextBudgetGuard } from "./context-budget.js";
 import { segmentHistory } from "./history-segments.js";
 
 function makeUser(text: string): AgentMessage {
-  return { role: "user", content: text, timestamp: 0 } as AgentMessage;
+  return { role: "user", content: text, timestamp: 0 } as unknown as AgentMessage;
 }
 
 function makeAssistant(text: string): AgentMessage {
-  return { role: "assistant", content: text, timestamp: 0 } as AgentMessage;
+  return { role: "assistant", content: text, timestamp: 0 } as unknown as AgentMessage;
 }
 
 function makeToolResult(
@@ -22,7 +22,7 @@ function makeToolResult(
     toolCallId,
     content: [{ type: "text", text }],
     timestamp: 0,
-  } as AgentMessage;
+  } as unknown as AgentMessage;
 }
 
 function buildDigestConfig(freezeMode?: "off" | "sliding" | "frozen") {
@@ -149,8 +149,8 @@ describe("context-budget frozen watermark", () => {
 
   it("segments history deterministically and without side effects", () => {
     const messages: AgentMessage[] = [
-      { ...makeUser("turn-1"), frozen: true } as AgentMessage,
-      { ...makeToolResult("digest", "read", "read-1"), frozen: true } as AgentMessage,
+      { ...makeUser("turn-1"), frozen: true } as unknown as AgentMessage,
+      { ...makeToolResult("digest", "read", "read-1"), frozen: true } as unknown as AgentMessage,
       makeUser("turn-2"),
       makeAssistant("warm"),
       makeUser("turn-3"),

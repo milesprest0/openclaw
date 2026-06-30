@@ -5,12 +5,12 @@ import { segmentHistory } from "./history-segments.js";
 describe("segmentHistory", () => {
   it("splits frozen, warm, and live segments", () => {
     const messages: AgentMessage[] = [
-      { role: "user", content: "u1", timestamp: 0, frozen: true } as AgentMessage,
-      { role: "assistant", content: "a1", timestamp: 0, frozen: true } as AgentMessage,
-      { role: "user", content: "u2", timestamp: 0 } as AgentMessage,
-      { role: "assistant", content: "a2", timestamp: 0 } as AgentMessage,
-      { role: "user", content: "u3", timestamp: 0 } as AgentMessage,
-      { role: "assistant", content: "a3", timestamp: 0 } as AgentMessage,
+      { role: "user", content: "u1", timestamp: 0, frozen: true } as unknown as AgentMessage,
+      { role: "assistant", content: "a1", timestamp: 0, frozen: true } as unknown as AgentMessage,
+      { role: "user", content: "u2", timestamp: 0 } as unknown as AgentMessage,
+      { role: "assistant", content: "a2", timestamp: 0 } as unknown as AgentMessage,
+      { role: "user", content: "u3", timestamp: 0 } as unknown as AgentMessage,
+      { role: "assistant", content: "a3", timestamp: 0 } as unknown as AgentMessage,
     ];
 
     const segmented = segmentHistory(messages, {
