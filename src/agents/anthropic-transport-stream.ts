@@ -13,6 +13,7 @@ import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../shared/assistant-
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import {
   applyAnthropicPayloadPolicyToParams,
+  type AnthropicHistoryCacheBreakpointsMode,
   resolveAnthropicPayloadPolicy,
 } from "./anthropic-payload-policy.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./copilot-dynamic-headers.js";
@@ -59,7 +60,9 @@ type AnthropicTransportModel = Model<"anthropic-messages"> & {
 };
 
 type AnthropicTransportOptions = AnthropicOptions &
-  Pick<SimpleStreamOptions, "reasoning" | "thinkingBudgets">;
+  Pick<SimpleStreamOptions, "reasoning" | "thinkingBudgets"> & {
+    historyCacheBreakpoints?: AnthropicHistoryCacheBreakpointsMode;
+  };
 type AnthropicAdaptiveEffort = NonNullable<AnthropicOptions["effort"]> | "xhigh";
 type AnthropicMessagesClient = {
   messages: {
@@ -803,7 +806,9 @@ function buildAnthropicParams(
     params.tool_choice =
       typeof options.toolChoice === "string" ? { type: options.toolChoice } : options.toolChoice;
   }
-  applyAnthropicPayloadPolicyToParams(params, payloadPolicy);
+  applyAnthropicPayloadPolicyToParams(params, payloadPolicy, {
+    historyBreakpoints: options?.historyCacheBreakpoints,
+  });
   return params;
 }
 
@@ -829,6 +834,7 @@ function resolveAnthropicTransportOptions(
     signal: options?.signal,
     apiKey,
     cacheRetention: options?.cacheRetention,
+    historyCacheBreakpoints: options?.historyCacheBreakpoints,
     sessionId: options?.sessionId,
     headers: options?.headers,
     onPayload: options?.onPayload,

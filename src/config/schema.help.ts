@@ -1001,6 +1001,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Experimental agent-default flags. Keep these off unless you are intentionally testing a preview surface.",
   "agents.defaults.experimental.localModelLean":
     "Experimental local-model prompt trim. When enabled, OpenClaw drops heavyweight default tools like browser, cron, and message for weaker or smaller local-model backends.",
+  "agents.defaults.experimental.historyCacheBreakpoints":
+    'Experimental Anthropic history cache breakpoints: "off" (default) keeps history markers unchanged, "shadow" computes frozen/warm breakpoint indices for diagnostics without mutating payloads, and "on" emits history breakpoints only when frozen:true tags are present in the assembled message payload.',
   "agents.defaults.experimental.openRouterGoogleCache":
     'Stamp OpenRouter cache_control markers on OpenRouter-routed Gemini models (gemini-2.5 / gemini-3). Gemini does no implicit prefix caching over OpenRouter, so a stable system prefix is otherwise re-billed every turn. "off" (default) leaves Gemini uncached; "on" caches the prefix (~91% input savings on warm turns). Does not affect Anthropic caching.',
   "agents.defaults.bootstrapPromptTruncationWarning":

@@ -125,6 +125,9 @@ export const AgentDefaultsSchema = z
         thinkingEviction: z
           .union([z.literal("off"), z.literal("shadow"), z.literal("on")])
           .optional(),
+        historyCacheBreakpoints: z
+          .union([z.literal("off"), z.literal("shadow"), z.literal("on")])
+          .optional(),
         openRouterGoogleCache: z.union([z.literal("off"), z.literal("on")]).optional(),
       })
       .strict()

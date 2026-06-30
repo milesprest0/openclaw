@@ -11,6 +11,13 @@ export type AnthropicEphemeralCacheControl = {
   ttl?: "1h";
 };
 
+export type AnthropicHistoryCacheBreakpointsMode = "off" | "shadow" | "on";
+
+export type AnthropicHistoryCacheBreakpointsDiagnostics = {
+  lastFrozenIdx: number | null;
+  lastStableWarmIdx: number | null;
+};
+
 type AnthropicPayloadPolicyInput = {
   api?: string;
   baseUrl?: string;
@@ -133,8 +140,22 @@ function stripAnthropicSystemPromptBoundary(system: unknown): void {
 function applyAnthropicCacheControlToMessages(
   messages: unknown,
   cacheControl: AnthropicEphemeralCacheControl,
+  options?: AnthropicEphemeralCacheMarkerOptions,
 ): void {
   if (!Array.isArray(messages) || messages.length === 0) {
+    return;
+  }
+
+  const historyMode = options?.historyBreakpoints ?? "off";
+  if (
+    historyMode !== "off" &&
+    applyHistoryCacheBreakpoints({
+      messages,
+      cacheControl,
+      mode: historyMode,
+      onComputed: options?.onHistoryBreakpointsComputed,
+    })
+  ) {
     return;
   }
 
@@ -200,6 +221,7 @@ export function resolveAnthropicPayloadPolicy(
 export function applyAnthropicPayloadPolicyToParams(
   payloadObj: Record<string, unknown>,
   policy: AnthropicPayloadPolicy,
+  options?: AnthropicEphemeralCacheMarkerOptions,
 ): void {
   if (
     policy.allowsServiceTier &&
@@ -219,8 +241,9 @@ export function applyAnthropicPayloadPolicyToParams(
     return;
   }
 
-  // Preserve Anthropic cache-write scope by only tagging the trailing user turn.
-  applyAnthropicCacheControlToMessages(payloadObj.messages, policy.cacheControl);
+  // Default behavior tags only the trailing user turn; experimental history
+  // breakpoints can replace that marker when frozen boundaries are present.
+  applyAnthropicCacheControlToMessages(payloadObj.messages, policy.cacheControl, options);
 }
 
 export type AnthropicEphemeralCacheMarkerOptions = {
@@ -231,6 +254,14 @@ export type AnthropicEphemeralCacheMarkerOptions = {
    * pass nothing keep the conservative 5m default.
    */
   ttl?: "1h";
+  /**
+   * Phase 2a history cache breakpoints.
+   * - off (default): no history marker changes.
+   * - shadow: compute [3]/[4] candidates and emit diagnostics only.
+   * - on: place [3]/[4] when a frozen boundary is present.
+   */
+  historyBreakpoints?: AnthropicHistoryCacheBreakpointsMode;
+  onHistoryBreakpointsComputed?: (diagnostics: AnthropicHistoryCacheBreakpointsDiagnostics) => void;
 };
 
 /**
@@ -341,6 +372,171 @@ function applyToolDefinitionsCacheControl(
   }
 }
 
+function isThinkingType(type: unknown): boolean {
+  return type === "thinking" || type === "redacted_thinking";
+}
+
+function isFrozenMessage(record: Record<string, unknown>): boolean {
+  if (record.frozen === true) {
+    return true;
+  }
+  const content = record.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+  const last = content[content.length - 1];
+  return !!last && typeof last === "object" && (last as Record<string, unknown>).frozen === true;
+}
+
+function findLastNonThinkingBlockIndex(content: unknown[]): number {
+  for (let i = content.length - 1; i >= 0; i -= 1) {
+    const block = content[i];
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    if (!isThinkingType((block as Record<string, unknown>).type)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function clearHistoryCacheControlMarkers(messages: unknown[]): void {
+  for (const message of messages) {
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    const messageRecord = message as Record<string, unknown>;
+    if (messageRecord.role === "system" || messageRecord.role === "developer") {
+      continue;
+    }
+    const content = messageRecord.content;
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    for (const block of content) {
+      if (block && typeof block === "object") {
+        delete (block as Record<string, unknown>).cache_control;
+      }
+    }
+  }
+}
+
+function resolveHistoryCacheBreakpointIndices(messages: unknown[]): {
+  hasFrozenBoundary: boolean;
+  lastFrozenIdx: number | null;
+  lastStableWarmIdx: number | null;
+} {
+  let lastFrozenIdx: number | null = null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    if (isFrozenMessage(message as Record<string, unknown>)) {
+      lastFrozenIdx = i;
+      break;
+    }
+  }
+
+  if (lastFrozenIdx === null) {
+    return {
+      hasFrozenBoundary: false,
+      lastFrozenIdx: null,
+      lastStableWarmIdx: null,
+    };
+  }
+
+  let lastStableWarmIdx: number | null = null;
+  for (let i = messages.length - 2; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    const messageRecord = message as Record<string, unknown>;
+    if (messageRecord.role === "system" || messageRecord.role === "developer") {
+      continue;
+    }
+    if (isFrozenMessage(messageRecord)) {
+      continue;
+    }
+    lastStableWarmIdx = i;
+    break;
+  }
+
+  return {
+    hasFrozenBoundary: true,
+    lastFrozenIdx,
+    lastStableWarmIdx,
+  };
+}
+
+function applyHistoryCacheBreakpointMarker(params: {
+  messages: unknown[];
+  targetIndex: number | null;
+  cacheControl: AnthropicEphemeralCacheControl;
+}): void {
+  if (params.targetIndex === null) {
+    return;
+  }
+  const message = params.messages[params.targetIndex];
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  const messageRecord = message as Record<string, unknown>;
+  const content = messageRecord.content;
+  if (Array.isArray(content)) {
+    const blockIndex = findLastNonThinkingBlockIndex(content);
+    if (blockIndex < 0) {
+      return;
+    }
+    const block = content[blockIndex];
+    if (!block || typeof block !== "object") {
+      return;
+    }
+    (block as Record<string, unknown>).cache_control = params.cacheControl;
+    return;
+  }
+
+  if (typeof content === "string") {
+    messageRecord.content = [
+      {
+        type: "text",
+        text: content,
+        cache_control: params.cacheControl,
+      },
+    ];
+  }
+}
+
+function applyHistoryCacheBreakpoints(params: {
+  messages: unknown[];
+  cacheControl: AnthropicEphemeralCacheControl;
+  mode: AnthropicHistoryCacheBreakpointsMode;
+  onComputed?: (diagnostics: AnthropicHistoryCacheBreakpointsDiagnostics) => void;
+}): boolean {
+  const resolved = resolveHistoryCacheBreakpointIndices(params.messages);
+  params.onComputed?.({
+    lastFrozenIdx: resolved.lastFrozenIdx,
+    lastStableWarmIdx: resolved.lastStableWarmIdx,
+  });
+  if (!resolved.hasFrozenBoundary || params.mode !== "on") {
+    return false;
+  }
+  clearHistoryCacheControlMarkers(params.messages);
+  applyHistoryCacheBreakpointMarker({
+    messages: params.messages,
+    targetIndex: resolved.lastFrozenIdx,
+    cacheControl: params.cacheControl,
+  });
+  applyHistoryCacheBreakpointMarker({
+    messages: params.messages,
+    targetIndex: resolved.lastStableWarmIdx,
+    cacheControl: params.cacheControl,
+  });
+  return true;
+}
+
 export function applyAnthropicEphemeralCacheControlMarkers(
   payloadObj: Record<string, unknown>,
   options?: AnthropicEphemeralCacheMarkerOptions,
@@ -382,7 +578,7 @@ export function applyAnthropicEphemeralCacheControlMarkers(
         const last = message.content[message.content.length - 1];
         if (last && typeof last === "object") {
           const record = last as Record<string, unknown>;
-          if (record.type !== "thinking" && record.type !== "redacted_thinking") {
+          if (!isThinkingType(record.type)) {
             record.cache_control = cacheControl;
           }
         }
@@ -396,10 +592,21 @@ export function applyAnthropicEphemeralCacheControlMarkers(
           continue;
         }
         const record = block as Record<string, unknown>;
-        if (record.type === "thinking" || record.type === "redacted_thinking") {
+        if (isThinkingType(record.type)) {
           delete record.cache_control;
         }
       }
     }
   }
+
+  const historyMode = options?.historyBreakpoints ?? "off";
+  if (historyMode === "off") {
+    return;
+  }
+  applyHistoryCacheBreakpoints({
+    messages,
+    cacheControl,
+    mode: historyMode,
+    onComputed: options?.onHistoryBreakpointsComputed,
+  });
 }

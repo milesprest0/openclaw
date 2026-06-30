@@ -73,6 +73,15 @@ describe("agent defaults schema", () => {
     expect(result.experimental?.thinkingEviction).toBe("shadow");
   });
 
+  it("accepts experimental.historyCacheBreakpoints", () => {
+    const result = AgentDefaultsSchema.parse({
+      experimental: {
+        historyCacheBreakpoints: "shadow",
+      },
+    })!;
+    expect(result.experimental?.historyCacheBreakpoints).toBe("shadow");
+  });
+
   it("accepts experimental.openRouterGoogleCache", () => {
     const result = AgentDefaultsSchema.parse({
       experimental: {
