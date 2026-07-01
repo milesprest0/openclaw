@@ -115,7 +115,89 @@ describe("slack subagent hook handlers", () => {
     );
   });
 
-  it("announces completion and clears progress ticker on subagent_ended", async () => {
+  it("clears the ticker when ended targetSessionKey mismatches but runId matches", async () => {
+    vi.useFakeTimers();
+    const handlers = registerHandlersForTest();
+    const spawnedHandler = getRequiredHookHandler(handlers, "subagent_spawned");
+    const endedHandler = getRequiredHookHandler(handlers, "subagent_ended");
+
+    await spawnedHandler(
+      {
+        runId: "run-mismatch",
+        childSessionKey: "agent:main:subagent:child-mismatch",
+        agentId: "codex",
+        label: "bugfix",
+        mode: "run",
+        threadRequested: true,
+        requester: {
+          channel: "slack",
+          accountId: "work",
+          to: "channel:C123",
+          threadId: "1710000000.100001",
+        },
+      },
+      {},
+    );
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(2);
+
+    await endedHandler(
+      {
+        runId: "run-mismatch",
+        targetSessionKey: "agent:main:subagent:other-session-key",
+        targetKind: "subagent",
+        reason: "complete",
+        outcome: "ok",
+      },
+      {},
+    );
+
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(3);
+    expect(hookMocks.sendMessageSlack).toHaveBeenLastCalledWith(
+      "channel:C123",
+      expect.stringContaining("completed"),
+      expect.objectContaining({
+        accountId: "work",
+        threadTs: "1710000000.100001",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(3);
+  });
+
+  it("self-terminates stale tickers at max age without an ended event", async () => {
+    vi.useFakeTimers();
+    const handlers = registerHandlersForTest();
+    const spawnedHandler = getRequiredHookHandler(handlers, "subagent_spawned");
+
+    await spawnedHandler(
+      {
+        runId: "run-max-age",
+        childSessionKey: "agent:main:subagent:max-age",
+        agentId: "codex",
+        label: "bugfix",
+        mode: "run",
+        threadRequested: true,
+        requester: {
+          channel: "slack",
+          accountId: "work",
+          to: "channel:C123",
+          threadId: "1710000000.100001",
+        },
+      },
+      {},
+    );
+
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(13);
+
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(13);
+  });
+
+  it("announces completion and clears progress ticker on matching subagent_ended keys", async () => {
     vi.useFakeTimers();
     const handlers = registerHandlersForTest();
     const spawnedHandler = getRequiredHookHandler(handlers, "subagent_spawned");

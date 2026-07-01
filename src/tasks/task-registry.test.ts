@@ -24,6 +24,7 @@ import {
   findLatestTaskForRelatedSessionKey,
   findTaskByRunId,
   getTaskById,
+  getTaskRegistrySnapshot,
   getTaskRegistrySummary,
   isParentFlowLinkError,
   listTasksForAgentId,
@@ -44,6 +45,7 @@ import {
   setTaskRegistryControlRuntimeForTests,
   setTaskRegistryDeliveryRuntimeForTests,
   setTaskProgressById,
+  setTaskRunDeliveryStatusByRunId,
   setTaskTimingById,
   updateTaskNotifyPolicyById,
 } from "./task-registry.js";
@@ -1417,6 +1419,147 @@ describe("task-registry", () => {
       expect(findTaskByRunId("run-racing-delivery")).toMatchObject({
         deliveryStatus: "delivered",
       });
+    });
+  });
+
+  it("does not redeliver a terminal update after watermark-stamped delivery", async () => {
+    await withTaskRegistryTempDir(async (root) => {
+      process.env.OPENCLAW_STATE_DIR = root;
+      resetTaskRegistryForTests();
+      hoisted.sendMessageMock.mockResolvedValue({
+        channel: "notifychat",
+        to: "notifychat:123",
+        via: "direct",
+      });
+
+      const task = createTaskRecord({
+        runtime: "acp",
+        ownerKey: "agent:main:main",
+        scopeKind: "session",
+        requesterOrigin: {
+          channel: "notifychat",
+          to: "notifychat:123",
+        },
+        childSessionKey: "agent:main:acp:child-empty-result",
+        runId: "run-empty-result-no-loop",
+        task: "Return terminal result",
+        status: "running",
+        deliveryStatus: "pending",
+      });
+      const terminalTask = markTaskTerminalById({
+        taskId: task.taskId,
+        status: "succeeded",
+        endedAt: Date.now(),
+        terminalSummary: null,
+      });
+      expect(terminalTask).toBeTruthy();
+
+      await maybeDeliverTaskTerminalUpdate(task.taskId);
+      expect(hoisted.sendMessageMock).toHaveBeenCalledTimes(1);
+
+      setTaskRunDeliveryStatusByRunId({
+        runId: "run-empty-result-no-loop",
+        deliveryStatus: "pending",
+      });
+
+      await maybeDeliverTaskTerminalUpdate(task.taskId);
+      expect(hoisted.sendMessageMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("stamps lastNotifiedEventAt after terminal delivery", async () => {
+    await withTaskRegistryTempDir(async (root) => {
+      process.env.OPENCLAW_STATE_DIR = root;
+      resetTaskRegistryForTests();
+      hoisted.sendMessageMock.mockResolvedValue({
+        channel: "notifychat",
+        to: "notifychat:123",
+        via: "direct",
+      });
+
+      const task = createTaskRecord({
+        runtime: "acp",
+        ownerKey: "agent:main:main",
+        scopeKind: "session",
+        requesterOrigin: {
+          channel: "notifychat",
+          to: "notifychat:123",
+        },
+        childSessionKey: "agent:main:acp:child-watermark",
+        runId: "run-terminal-watermark",
+        task: "Stamp terminal watermark",
+        status: "running",
+        deliveryStatus: "pending",
+      });
+      const terminalTask = markTaskTerminalById({
+        taskId: task.taskId,
+        status: "succeeded",
+        endedAt: Date.now(),
+      });
+      expect(terminalTask).toBeTruthy();
+
+      await maybeDeliverTaskTerminalUpdate(task.taskId);
+
+      const deliveryState = getTaskRegistrySnapshot().deliveryStates.find(
+        (state) => state.taskId === task.taskId,
+      );
+      expect(deliveryState?.lastNotifiedEventAt).toBeTypeOf("number");
+    });
+  });
+
+  it("allows retry after transient terminal send failure and still stamps on success", async () => {
+    await withTaskRegistryTempDir(async (root) => {
+      process.env.OPENCLAW_STATE_DIR = root;
+      resetTaskRegistryForTests();
+      hoisted.sendMessageMock
+        .mockRejectedValueOnce(new Error("temporary network failure"))
+        .mockResolvedValueOnce({
+          channel: "notifychat",
+          to: "notifychat:123",
+          via: "direct",
+        });
+
+      const task = createTaskRecord({
+        runtime: "acp",
+        ownerKey: "agent:main:main",
+        scopeKind: "session",
+        requesterOrigin: {
+          channel: "notifychat",
+          to: "notifychat:123",
+        },
+        childSessionKey: "agent:main:acp:child-retry",
+        runId: "run-terminal-retry",
+        task: "Retry delivery after network error",
+        status: "running",
+        deliveryStatus: "pending",
+      });
+      const terminalTask = markTaskTerminalById({
+        taskId: task.taskId,
+        status: "succeeded",
+        endedAt: Date.now(),
+      });
+      expect(terminalTask).toBeTruthy();
+
+      await maybeDeliverTaskTerminalUpdate(task.taskId);
+      expect(findTaskByRunId("run-terminal-retry")).toMatchObject({
+        deliveryStatus: "failed",
+      });
+
+      setTaskRunDeliveryStatusByRunId({
+        runId: "run-terminal-retry",
+        deliveryStatus: "pending",
+      });
+
+      await maybeDeliverTaskTerminalUpdate(task.taskId);
+      expect(hoisted.sendMessageMock).toHaveBeenCalledTimes(2);
+      expect(findTaskByRunId("run-terminal-retry")).toMatchObject({
+        deliveryStatus: "delivered",
+      });
+
+      const deliveryState = getTaskRegistrySnapshot().deliveryStates.find(
+        (state) => state.taskId === task.taskId,
+      );
+      expect(deliveryState?.lastNotifiedEventAt).toBeTypeOf("number");
     });
   });
 
