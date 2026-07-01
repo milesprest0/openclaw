@@ -1111,11 +1111,26 @@ function queueBlockedTaskFollowup(task: TaskRecord) {
   return true;
 }
 
+function resolveTaskTerminalNotifyAt(task: TaskRecord): number {
+  if (typeof task.lastEventAt === "number") {
+    return task.lastEventAt;
+  }
+  if (typeof task.endedAt === "number") {
+    return task.endedAt;
+  }
+  return Date.now();
+}
+
 export async function maybeDeliverTaskTerminalUpdate(taskId: string): Promise<TaskRecord | null> {
   ensureTaskRegistryReady();
   const current = tasks.get(taskId);
   if (!current || !shouldAutoDeliverTaskTerminalUpdate(current)) {
     return current ? cloneTaskRecord(current) : null;
+  }
+  const currentDeliveryState = getTaskDeliveryState(taskId);
+  const currentTerminalNotifyAt = resolveTaskTerminalNotifyAt(current);
+  if ((currentDeliveryState?.lastNotifiedEventAt ?? 0) >= currentTerminalNotifyAt) {
+    return cloneTaskRecord(current);
   }
   if (tasksWithPendingDelivery.has(taskId)) {
     return cloneTaskRecord(current);
@@ -1126,23 +1141,38 @@ export async function maybeDeliverTaskTerminalUpdate(taskId: string): Promise<Ta
     if (!latest || !shouldAutoDeliverTaskTerminalUpdate(latest)) {
       return latest ? cloneTaskRecord(latest) : null;
     }
+    const deliveryState = getTaskDeliveryState(taskId);
+    const terminalNotifyAt = resolveTaskTerminalNotifyAt(latest);
+    if ((deliveryState?.lastNotifiedEventAt ?? 0) >= terminalNotifyAt) {
+      return cloneTaskRecord(latest);
+    }
     const preferred = latest.runId
       ? pickPreferredRunIdTask(getPeerTasksForDelivery(latest))
       : undefined;
     if (
       shouldSuppressDuplicateTerminalDelivery({ task: latest, preferredTaskId: preferred?.taskId })
     ) {
+      upsertTaskDeliveryState({
+        taskId,
+        requesterOrigin: deliveryState?.requesterOrigin,
+        lastNotifiedEventAt: terminalNotifyAt,
+      });
       return updateTask(taskId, {
         deliveryStatus: "not_applicable",
-        lastEventAt: Date.now(),
+        lastEventAt: terminalNotifyAt,
       });
     }
     const owner = resolveTaskDeliveryOwner(latest);
     const ownerSessionKey = owner.sessionKey?.trim();
     if (!ownerSessionKey) {
+      upsertTaskDeliveryState({
+        taskId,
+        requesterOrigin: deliveryState?.requesterOrigin,
+        lastNotifiedEventAt: terminalNotifyAt,
+      });
       return updateTask(taskId, {
         deliveryStatus: resolveMissingOwnerDeliveryStatus(latest),
-        lastEventAt: Date.now(),
+        lastEventAt: terminalNotifyAt,
       });
     }
     const eventText = formatTaskTerminalMessage(latest);
@@ -1152,9 +1182,14 @@ export async function maybeDeliverTaskTerminalUpdate(taskId: string): Promise<Ta
         if (latest.terminalOutcome === "blocked") {
           queueBlockedTaskFollowup(latest);
         }
+        upsertTaskDeliveryState({
+          taskId,
+          requesterOrigin: deliveryState?.requesterOrigin,
+          lastNotifiedEventAt: terminalNotifyAt,
+        });
         return updateTask(taskId, {
           deliveryStatus: "session_queued",
-          lastEventAt: Date.now(),
+          lastEventAt: terminalNotifyAt,
         });
       } catch (error) {
         log.warn("Failed to queue background task session delivery", {
@@ -1189,9 +1224,14 @@ export async function maybeDeliverTaskTerminalUpdate(taskId: string): Promise<Ta
       if (latest.terminalOutcome === "blocked") {
         queueBlockedTaskFollowup(latest);
       }
+      upsertTaskDeliveryState({
+        taskId,
+        requesterOrigin: deliveryState?.requesterOrigin,
+        lastNotifiedEventAt: terminalNotifyAt,
+      });
       return updateTask(taskId, {
         deliveryStatus: "delivered",
-        lastEventAt: Date.now(),
+        lastEventAt: terminalNotifyAt,
       });
     } catch (error) {
       log.warn("Failed to deliver background task update", {
