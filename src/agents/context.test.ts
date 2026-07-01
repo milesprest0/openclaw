@@ -317,6 +317,39 @@ describe("resolveContextTokensForModel", () => {
     expect(result).toBe(ANTHROPIC_CONTEXT_1M_TOKENS);
   });
 
+  it("returns 1M context when anthropic context1m is enabled for sonnet 5", () => {
+    // Sonnet 5 (live 2026-07-01) is 1M-context. The "claude-sonnet-5" prefix must
+    // be recognized by isAnthropic1MModel even though it does not start with the
+    // existing "claude-sonnet-4" prefix.
+    const result = resolveContextTokensForModel({
+      cfg: {
+        models: {
+          providers: {
+            anthropic: {
+              baseUrl: "https://api.anthropic.com",
+              models: [testModelContextWindow("claude-sonnet-5", 200_000)],
+            },
+          },
+        },
+        agents: {
+          defaults: {
+            models: {
+              "anthropic/claude-sonnet-5": {
+                params: { context1m: true },
+              },
+            },
+          },
+        },
+      },
+      provider: "anthropic",
+      model: "claude-sonnet-5",
+      fallbackContextTokens: 200_000,
+      allowAsyncLoad: false,
+    });
+
+    expect(result).toBe(ANTHROPIC_CONTEXT_1M_TOKENS);
+  });
+
   it("returns 1M context when claude-cli context1m is enabled for opus/sonnet", () => {
     const result = resolveContextTokensForModel({
       cfg: {

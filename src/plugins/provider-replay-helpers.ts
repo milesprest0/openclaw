@@ -97,6 +97,17 @@ export function shouldPreserveThinkingBlocks(modelId?: string): boolean {
     return true;
   }
 
+  // Name-first Claude 5+ ids (e.g. "claude-sonnet-5", "anthropic/claude-opus-5",
+  // "claude-sonnet-5-20260630"). Sonnet 5 (live 2026-07-01) preserves thinking
+  // blocks natively; the version-first `/claude-[5-9]/` check below misses it
+  // because the major digit follows the family name, not "claude-". Dropping
+  // thinking here would break sonnet-5 prompt-cache prefix matching. The
+  // `(?![0-9])` guard prevents an 8-digit date suffix (legacy
+  // "claude-3-5-sonnet-20241022") from being read as a major version.
+  if (/(?:opus|sonnet|haiku)-(?:[5-9]|\d{2})(?![0-9])/.test(id)) {
+    return true;
+  }
+
   // Always-latest aliases (e.g. "claude-opus-latest", "~anthropic/claude-sonnet-latest")
   // resolve to the current generation, which is 4.5+ and preserves thinking natively.
   // The version-number checks above miss these because the alias carries no digit, so
@@ -105,7 +116,7 @@ export function shouldPreserveThinkingBlocks(modelId?: string): boolean {
     return true;
   }
 
-  // Future-proofing: claude-5-x, claude-6-x etc. should also preserve
+  // Future-proofing: version-first claude-5-x, claude-6-x etc. should also preserve
   if (/claude-[5-9]/.test(id) || /claude-\d{2,}/.test(id)) {
     return true;
   }

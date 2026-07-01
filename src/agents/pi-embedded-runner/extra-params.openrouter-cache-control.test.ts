@@ -68,6 +68,64 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
     expect(payload.messages[1].content).toBe("Hello");
   });
 
+  it("injects cache_control for OpenRouter Sonnet 5 (anthropic/claude-sonnet-5)", () => {
+    // Sonnet 5 went live on OpenRouter 2026-07-01 (1M ctx, cache_read $0.20/M,
+    // cache_write $2.50/M). The cache_control marker injected here is what drives
+    // cache_write on the first call and a cached read on the second at the API.
+    const payload = {
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "anthropic/claude-sonnet-5");
+
+    expect(payload.messages[0].content).toEqual([
+      { type: "text", text: "You are a helpful assistant.", cache_control: { type: "ephemeral" } },
+    ]);
+    expect(payload.messages[1].content).toBe("Hello");
+  });
+
+  it("injects cache_control for the Sonnet always-latest tilde alias (~anthropic/claude-sonnet-latest)", () => {
+    // The always-latest alias resolves to sonnet-5. The leading `~` is
+    // OpenRouter's routing selector and must NOT hide the Anthropic family from
+    // cache_control injection (regression of the 2026-05-28 tilde-strip fix,
+    // now exercised for the Sonnet alias specifically).
+    const payload = {
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "~anthropic/claude-sonnet-latest");
+
+    expect(payload.messages[0].content).toEqual([
+      { type: "text", text: "You are a helpful assistant.", cache_control: { type: "ephemeral" } },
+    ]);
+    expect(payload.messages[1].content).toBe("Hello");
+  });
+
+  it("Sonnet 5: honors long TTL (ttl:1h) markers", () => {
+    const payload = {
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "anthropic/claude-sonnet-5", { cacheRetention: "long" });
+
+    expect(payload.messages[0].content).toEqual([
+      {
+        type: "text",
+        text: "You are a helpful assistant.",
+        cache_control: { type: "ephemeral", ttl: "1h" },
+      },
+    ]);
+  });
+
   it("adds cache_control to last content block when system message is already array", () => {
     const payload = {
       messages: [

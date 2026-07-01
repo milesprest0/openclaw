@@ -34,7 +34,14 @@ type ProviderConfigEntry = {
 type ModelsConfig = { providers?: Record<string, ProviderConfigEntry | undefined> };
 type AgentModelEntry = { params?: Record<string, unknown> };
 
-const ANTHROPIC_1M_MODEL_PREFIXES = ["claude-opus-4", "claude-sonnet-4"] as const;
+const ANTHROPIC_1M_MODEL_PREFIXES = [
+  "claude-opus-4",
+  "claude-sonnet-4",
+  // Sonnet 5 is 1M-context (verified 2026-07-01). The prefix list is
+  // family-id matched (last path segment), so add the name-first "claude-sonnet-5"
+  // form explicitly — it does NOT start with "claude-sonnet-4".
+  "claude-sonnet-5",
+] as const;
 const CLAUDE_OPUS_47_MODEL_PREFIXES = ["claude-opus-4-7", "claude-opus-4.7"] as const;
 export const ANTHROPIC_CONTEXT_1M_TOKENS = 1_048_576;
 const CONFIG_LOAD_RETRY_POLICY: BackoffPolicy = {

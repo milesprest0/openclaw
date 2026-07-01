@@ -230,15 +230,30 @@ describe("provider replay helpers", () => {
       }
     });
 
-    it("future-proofs Claude 5+ generations", () => {
+    it("future-proofs Claude 5+ generations (version-first and name-first)", () => {
       expect(shouldPreserveThinkingBlocks("claude-5-opus")).toBe(true);
       expect(shouldPreserveThinkingBlocks("anthropic/claude-7-sonnet")).toBe(true);
+      // Name-first ids (major digit after the family name). Sonnet 5 went live
+      // 2026-07-01; dropping thinking here would break its prompt-cache prefix.
+      for (const modelId of [
+        "claude-sonnet-5",
+        "anthropic/claude-sonnet-5",
+        "claude-sonnet-5-20260630",
+        "claude-opus-5",
+        "claude-haiku-5",
+        "claude-sonnet-12",
+      ]) {
+        expect(shouldPreserveThinkingBlocks(modelId)).toBe(true);
+      }
     });
 
     it("still drops thinking for legacy Claude and non-Claude models", () => {
       for (const modelId of [
         "claude-3-7-sonnet-20250219",
         "claude-3-5-sonnet-20240620",
+        // Regression: the sonnet-5 name-first match must NOT read an 8-digit
+        // date suffix on a legacy 3.5 id as a "major version 20240620".
+        "claude-3-5-sonnet-20241022",
         "google/gemini-3.5-flash",
         "openai/gpt-5.5",
         undefined,

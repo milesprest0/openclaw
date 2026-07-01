@@ -617,7 +617,12 @@ export async function runLiveCacheRegression(): Promise<LiveCacheRegressionResul
     provider: "anthropic",
     api: "anthropic-messages",
     envVar: "OPENCLAW_LIVE_ANTHROPIC_CACHE_MODEL",
-    preferredModelIds: ["claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-3-5"],
+    preferredModelIds: [
+      "claude-sonnet-5",
+      "claude-sonnet-4-6",
+      "claude-sonnet-4-5",
+      "claude-haiku-3-5",
+    ],
   });
 
   const regressions: string[] = [];

@@ -275,4 +275,19 @@ describe("resolveClaudeThinkingProfile", () => {
     );
     expect(fixedBudgetLevels).toEqual([]);
   });
+
+  it("Sonnet 5 uses the base thinking profile (no adaptive/xhigh until confirmed)", () => {
+    // DECISION 2026-07-01: sonnet-5's adaptive-thinking support is UNVERIFIED, so
+    // it is intentionally NOT added to CLAUDE_ADAPTIVE_THINKING_DEFAULT_MODEL_PREFIXES.
+    // Advertising `adaptive`/`xhigh` for a model that may not support it risks an
+    // API error; omitting it degrades safely to standard levels. Flip this test if
+    // Miles confirms sonnet-5 adaptive support.
+    const profile = resolveClaudeThinkingProfile("claude-sonnet-5");
+
+    const advancedLevels = profile.levels.filter(
+      (level) => level.id === "adaptive" || level.id === "xhigh" || level.id === "max",
+    );
+    expect(advancedLevels).toEqual([]);
+    expect(profile.defaultLevel).not.toBe("adaptive");
+  });
 });

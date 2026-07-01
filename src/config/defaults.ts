@@ -20,7 +20,7 @@ let defaultWarnState: WarnState = { warned: false };
 const DEFAULT_MODEL_ALIASES: Readonly<Record<string, string>> = {
   // Anthropic (pi-ai catalog uses "latest" ids without date suffix)
   opus: "anthropic/claude-opus-4-7",
-  sonnet: "anthropic/claude-sonnet-4-6",
+  sonnet: "anthropic/claude-sonnet-5",
 
   // OpenAI
   gpt: "~openai/gpt-latest",
