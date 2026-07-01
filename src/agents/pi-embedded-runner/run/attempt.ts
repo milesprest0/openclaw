@@ -176,7 +176,7 @@ import {
 } from "../../tool-allowlist-guard.js";
 import { UNKNOWN_TOOL_THRESHOLD } from "../../tool-loop-detection.js";
 import { shouldAllowProviderOwnedThinkingReplay } from "../../transcript-policy.js";
-import { normalizeUsage, type NormalizedUsage } from "../../usage.js";
+import { type NormalizedUsage } from "../../usage.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isRunnerAbortError } from "../abort.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "../cache-ttl.js";
@@ -277,8 +277,10 @@ import {
   assembleAttemptContextEngine,
   buildLoopPromptCacheInfo,
   buildContextEnginePromptCacheInfo,
+  findLatestAssistantMessage,
   findCurrentAttemptAssistantMessage,
   finalizeAttemptContextEngineTurn,
+  resolveSafeLastCallUsage,
   resolvePromptCacheTouchTimestamp,
   resolveAttemptBootstrapContext,
   runAttemptContextEngineBootstrap,
@@ -1845,6 +1847,8 @@ export async function runEmbeddedAttempt(
                   messagesSnapshot: messages,
                   prePromptMessageCount: loopPrePromptMessageCount,
                   retention: effectivePromptCacheRetention,
+                  provider: params.provider,
+                  model: params.modelId,
                   fallbackLastCacheTouchAt: readLastCacheTtlTimestamp(sessionManager, {
                     provider: params.provider,
                     modelId: params.modelId,
@@ -3602,10 +3606,9 @@ export async function runEmbeddedAttempt(
         messagesSnapshot = snapshotSelection.messagesSnapshot;
         sessionIdUsed = snapshotSelection.sessionIdUsed;
 
-        lastAssistant = messagesSnapshot
-          .slice()
-          .toReversed()
-          .find((m) => m.role === "assistant");
+        const latestAssistant = findLatestAssistantMessage(messagesSnapshot);
+        const latestAssistantIndex = latestAssistant?.index ?? -1;
+        lastAssistant = latestAssistant?.message;
         currentAttemptAssistant = findCurrentAttemptAssistantMessage({
           messagesSnapshot,
           prePromptMessageCount,
@@ -3629,7 +3632,13 @@ export async function runEmbeddedAttempt(
               usage: attemptUsage,
             })
           : null;
-        const lastCallUsage = normalizeUsage(currentAttemptAssistant?.usage);
+        const lastCallUsage = resolveSafeLastCallUsage({
+          assistant: latestAssistant?.message,
+          assistantIndex: latestAssistantIndex,
+          prePromptMessageCount,
+          provider: params.provider,
+          model: params.modelId,
+        });
         const promptCacheObservation =
           cacheObservabilityEnabled &&
           (cacheBreak || promptCacheChangesForTurn || typeof attemptUsage?.cacheRead === "number")

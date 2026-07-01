@@ -385,6 +385,7 @@ export function createFollowupRunner(params: {
           cfg: runtimeConfig,
           usage,
           lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
+          lastCallUsageFamily: runResult.meta?.agentMeta?.lastCallUsageFamily,
           promptTokens,
           modelUsed,
           servedModelUsed,

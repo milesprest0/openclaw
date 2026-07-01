@@ -48,6 +48,7 @@ export type EmbeddedPiAgentMeta = {
     cacheWrite?: number;
     total?: number;
   };
+  lastCallUsageFamily?: string;
 };
 
 export type TraceAttempt = {

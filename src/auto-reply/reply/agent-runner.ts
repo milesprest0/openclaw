@@ -1446,6 +1446,7 @@ export async function runReplyAgent(params: {
       cfg,
       usage,
       lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
+      lastCallUsageFamily: runResult.meta?.agentMeta?.lastCallUsageFamily,
       promptTokens,
       modelUsed,
       servedModelUsed,

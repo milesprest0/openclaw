@@ -199,13 +199,9 @@ describe("persistSessionUsageUpdate cache telemetry integrity", () => {
 
     expect(currentEntry.cacheRead).toBe(0);
     expect(currentEntry.cacheWrite).toBe(0);
-    expect(logTokenUsageRecordMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cacheRead: 0,
-        cacheWrite: 0,
-      }),
-      expect.anything(),
-    );
+    const usageRecord = logTokenUsageRecordMock.mock.calls.at(0)?.[0];
+    expect(usageRecord).not.toHaveProperty("cacheRead");
+    expect(usageRecord).not.toHaveProperty("cacheWrite");
   });
 
   it("records live last-call cache usage for the current call", async () => {
@@ -242,5 +238,24 @@ describe("persistSessionUsageUpdate cache telemetry integrity", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("drops cache telemetry when last-call usage family mismatches the current call", async () => {
+    await persistSessionUsageUpdate({
+      storePath: "/tmp/store",
+      sessionKey: "agent:main:session-cache",
+      usage: { input: 200, output: 20, cacheRead: 321, total: 541 },
+      lastCallUsage: { input: 200, output: 20, cacheRead: 321, cacheWrite: 12 },
+      lastCallUsageFamily: "anthropic",
+      providerUsed: "openai",
+      modelUsed: "gpt-5.5",
+      promptTokens: 521,
+    });
+
+    expect(currentEntry.cacheRead).toBe(0);
+    expect(currentEntry.cacheWrite).toBe(0);
+    const usageRecord = logTokenUsageRecordMock.mock.calls.at(0)?.[0];
+    expect(usageRecord).not.toHaveProperty("cacheRead");
+    expect(usageRecord).not.toHaveProperty("cacheWrite");
   });
 });

@@ -4,7 +4,12 @@ import { generateSecureToken } from "../../../infra/secure-random.js";
 import { logDebug } from "../../../logger.js";
 import { extractAssistantTextForPhase } from "../../../shared/chat-message-content.js";
 import { extractAssistantVisibleText } from "../../pi-embedded-utils.js";
-import { derivePromptTokens, normalizeUsage, sanitizePerCallCacheUsage } from "../../usage.js";
+import {
+  derivePromptTokens,
+  normalizeUsage,
+  providerFamily,
+  sanitizePerCallCacheUsage,
+} from "../../usage.js";
 import type { EmbeddedPiAgentMeta } from "../types.js";
 import { toNormalizedUsage, type UsageAccumulator } from "../usage-accumulator.js";
 
@@ -127,12 +132,26 @@ export function resolveReportedModelRef(params: {
   };
 }
 
+export function resolveAssistantMessageFamily(params: {
+  assistant?: { provider?: string; model?: string } | null;
+}): string | undefined {
+  const provider = params.assistant?.provider?.trim();
+  const model = params.assistant?.model?.trim();
+  if (!provider && !model) {
+    return undefined;
+  }
+  return providerFamily(
+    [provider, model].filter((value): value is string => Boolean(value)).join("/"),
+  );
+}
+
 export function buildUsageAgentMetaFields(params: {
   usageAccumulator: UsageAccumulator;
+  lastAssistant?: { provider?: string; model?: string } | null;
   lastAssistantUsage?: UsageSnapshot | null;
   lastRunPromptUsage: UsageSnapshot | undefined;
   lastTurnTotal?: number;
-}): Pick<EmbeddedPiAgentMeta, "usage" | "lastCallUsage" | "promptTokens"> {
+}): Pick<EmbeddedPiAgentMeta, "usage" | "lastCallUsage" | "lastCallUsageFamily" | "promptTokens"> {
   const usage = toNormalizedUsage(params.usageAccumulator);
   if (usage && params.lastTurnTotal && params.lastTurnTotal > 0) {
     usage.total = params.lastTurnTotal;
@@ -150,6 +169,7 @@ export function buildUsageAgentMetaFields(params: {
   return {
     usage,
     lastCallUsage,
+    lastCallUsageFamily: resolveAssistantMessageFamily({ assistant: params.lastAssistant }),
     promptTokens,
   };
 }
@@ -172,6 +192,7 @@ export function buildErrorAgentMeta(params: {
 }): EmbeddedPiAgentMeta {
   const usageMeta = buildUsageAgentMetaFields({
     usageAccumulator: params.usageAccumulator,
+    lastAssistant: params.lastAssistant as { provider?: string; model?: string } | undefined,
     lastAssistantUsage: params.lastAssistant?.usage as UsageSnapshot | undefined,
     lastRunPromptUsage: params.lastRunPromptUsage,
     lastTurnTotal: params.lastTurnTotal,
@@ -183,6 +204,9 @@ export function buildErrorAgentMeta(params: {
     ...(params.contextTokens ? { contextTokens: params.contextTokens } : {}),
     ...(usageMeta.usage ? { usage: usageMeta.usage } : {}),
     ...(usageMeta.lastCallUsage ? { lastCallUsage: usageMeta.lastCallUsage } : {}),
+    ...(usageMeta.lastCallUsageFamily
+      ? { lastCallUsageFamily: usageMeta.lastCallUsageFamily }
+      : {}),
     ...(usageMeta.promptTokens ? { promptTokens: usageMeta.promptTokens } : {}),
   };
 }
