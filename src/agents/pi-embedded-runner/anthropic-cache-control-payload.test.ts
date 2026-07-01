@@ -191,6 +191,51 @@ describe("applyAnthropicEphemeralCacheControlMarkers", () => {
     expect(payload).toEqual(offPayload);
   });
 
+  it("keeps the volatile timestamped live tail after the last cache breakpoint", () => {
+    // Regression: the per-turn timestamp injected by injectTimestamp
+    // (src/gateway/server-methods/agent-timestamp.ts) rides on the LAST user
+    // turn. That live tail changes every turn, so it MUST stay below (after)
+    // the last history cache breakpoint or it would bust the cached region.
+    const injectedTimestampTail = "[Wed 2026-07-01 00:09 UTC] latest user turn";
+    const payload = {
+      tools: [{ type: "function", function: { name: "one" } }],
+      messages: [
+        { role: "system", content: "sys" },
+        {
+          role: "assistant",
+          frozen: true,
+          content: [{ type: "text", text: "frozen block", frozen: true }],
+        },
+        { role: "user", content: [{ type: "text", text: "warm stable completed turn" }] },
+        { role: "user", content: [{ type: "text", text: injectedTimestampTail }] },
+      ],
+    } satisfies Record<string, unknown>;
+
+    applyAnthropicEphemeralCacheControlMarkers(payload, { historyBreakpoints: "on" });
+
+    const messages = payload.messages as Array<{ content?: unknown }>;
+    const liveTailIndex = messages.length - 1;
+
+    // The volatile live tail (carrying the injected timestamp) must be unmarked.
+    const liveTailBlocks = messages[liveTailIndex]?.content as Array<Record<string, unknown>>;
+    expect(liveTailBlocks[0]?.text).toBe(injectedTimestampTail);
+    expect(liveTailBlocks[0]).not.toHaveProperty("cache_control");
+
+    // Every history cache breakpoint must sit strictly before the live tail.
+    let lastMarkedMessageIndex = -1;
+    messages.forEach((message, index) => {
+      const content = message?.content;
+      if (!Array.isArray(content)) {
+        return;
+      }
+      if (content.some((block) => block && typeof block === "object" && "cache_control" in block)) {
+        lastMarkedMessageIndex = index;
+      }
+    });
+    expect(lastMarkedMessageIndex).toBeGreaterThanOrEqual(0); // breakpoints were placed
+    expect(lastMarkedMessageIndex).toBeLessThan(liveTailIndex); // never on the volatile tail
+  });
+
   it("keeps total cache_control markers within the four-breakpoint budget", () => {
     const payload = {
       tools: [
