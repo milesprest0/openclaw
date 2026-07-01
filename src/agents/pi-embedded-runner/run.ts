@@ -2322,6 +2322,7 @@ export async function runEmbeddedPiAgent(
           }
           const usageMeta = buildUsageAgentMetaFields({
             usageAccumulator,
+            lastAssistant: sessionLastAssistant,
             lastAssistantUsage: sessionLastAssistant?.usage as UsageLike | undefined,
             lastRunPromptUsage,
             lastTurnTotal,
@@ -2341,6 +2342,7 @@ export async function runEmbeddedPiAgent(
             agentHarnessId: attempt.agentHarnessId,
             usage: usageMeta.usage,
             lastCallUsage: usageMeta.lastCallUsage,
+            lastCallUsageFamily: usageMeta.lastCallUsageFamily,
             promptTokens: usageMeta.promptTokens,
             compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
             compactionTokensAfter: lastCompactionTokensAfter,

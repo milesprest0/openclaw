@@ -2,7 +2,7 @@ import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ContextEngine } from "../../../context-engine/types.js";
 import type { BootstrapMode } from "../../bootstrap-mode.js";
-import { normalizeUsage, type NormalizedUsage } from "../../usage.js";
+import { normalizeUsage, providerFamily, type NormalizedUsage } from "../../usage.js";
 import type { PromptCacheChange } from "../prompt-cache-observability.js";
 import type { EmbeddedRunAttemptResult } from "./types.js";
 export {
@@ -107,10 +107,138 @@ export function findCurrentAttemptAssistantMessage(params: {
   messagesSnapshot: AgentMessage[];
   prePromptMessageCount: number;
 }): AssistantMessage | undefined {
-  return params.messagesSnapshot
-    .slice(Math.max(0, params.prePromptMessageCount))
-    .toReversed()
-    .find((message): message is AssistantMessage => message.role === "assistant");
+  const latest = findLatestAssistantMessage(params.messagesSnapshot);
+  if (!latest) {
+    return undefined;
+  }
+  return latest.index >= Math.max(0, params.prePromptMessageCount) ? latest.message : undefined;
+}
+
+export function findLatestAssistantMessage(messagesSnapshot: AgentMessage[]):
+  | {
+      message: AssistantMessage;
+      index: number;
+    }
+  | undefined {
+  for (let index = messagesSnapshot.length - 1; index >= 0; index -= 1) {
+    const message = messagesSnapshot[index];
+    if (message.role === "assistant") {
+      return {
+        message,
+        index,
+      };
+    }
+  }
+  return undefined;
+}
+
+function hasProviderOrModelTag(assistant: AssistantMessage | undefined): boolean {
+  if (!assistant) {
+    return false;
+  }
+  const maybeAssistant = assistant as {
+    provider?: unknown;
+    model?: unknown;
+    metadata?: { provider?: unknown; model?: unknown };
+    meta?: { provider?: unknown; model?: unknown };
+  };
+  return [
+    maybeAssistant.provider,
+    maybeAssistant.model,
+    maybeAssistant.metadata?.provider,
+    maybeAssistant.metadata?.model,
+    maybeAssistant.meta?.provider,
+    maybeAssistant.meta?.model,
+  ].some((value) => typeof value === "string" && value.trim().length > 0);
+}
+
+function resolveFamilyFromAssistantMessage(
+  assistant: AssistantMessage | undefined,
+): string | undefined {
+  if (!assistant) {
+    return undefined;
+  }
+  const maybeAssistant = assistant as {
+    provider?: unknown;
+    model?: unknown;
+    metadata?: { provider?: unknown; model?: unknown };
+    meta?: { provider?: unknown; model?: unknown };
+  };
+  const provider =
+    typeof maybeAssistant.provider === "string" && maybeAssistant.provider.trim().length > 0
+      ? maybeAssistant.provider.trim()
+      : typeof maybeAssistant.metadata?.provider === "string" &&
+          maybeAssistant.metadata.provider.trim().length > 0
+        ? maybeAssistant.metadata.provider.trim()
+        : typeof maybeAssistant.meta?.provider === "string" &&
+            maybeAssistant.meta.provider.trim().length > 0
+          ? maybeAssistant.meta.provider.trim()
+          : undefined;
+  const model =
+    typeof maybeAssistant.model === "string" && maybeAssistant.model.trim().length > 0
+      ? maybeAssistant.model.trim()
+      : typeof maybeAssistant.metadata?.model === "string" &&
+          maybeAssistant.metadata.model.trim().length > 0
+        ? maybeAssistant.metadata.model.trim()
+        : typeof maybeAssistant.meta?.model === "string" &&
+            maybeAssistant.meta.model.trim().length > 0
+          ? maybeAssistant.meta.model.trim()
+          : undefined;
+  if (!provider && !model) {
+    return undefined;
+  }
+  const ref = [provider, model].filter((value): value is string => Boolean(value)).join("/");
+  return providerFamily(ref);
+}
+
+function resolveFamilyFromCallRef(params: {
+  provider?: string;
+  model?: string;
+}): string | undefined {
+  const provider = params.provider?.trim();
+  const model = params.model?.trim();
+  if (!provider && !model) {
+    return undefined;
+  }
+  const ref = [provider, model].filter((value): value is string => Boolean(value)).join("/");
+  return providerFamily(ref);
+}
+
+function dropCacheFields(usage: NormalizedUsage | undefined): NormalizedUsage | undefined {
+  if (!usage) {
+    return undefined;
+  }
+  return {
+    ...usage,
+    cacheRead: undefined,
+    cacheWrite: undefined,
+  };
+}
+
+export function resolveSafeLastCallUsage(params: {
+  assistant?: AssistantMessage;
+  assistantIndex: number;
+  prePromptMessageCount: number;
+  provider?: string;
+  model?: string;
+}): NormalizedUsage | undefined {
+  const usage = normalizeUsage(params.assistant?.usage);
+  if (!usage) {
+    return undefined;
+  }
+  const isPositionallyFresh = params.assistantIndex >= Math.max(0, params.prePromptMessageCount);
+  if (!isPositionallyFresh) {
+    return dropCacheFields(usage);
+  }
+  if (!hasProviderOrModelTag(params.assistant)) {
+    return usage;
+  }
+  const assistantFamily = resolveFamilyFromAssistantMessage(params.assistant);
+  const callFamily = resolveFamilyFromCallRef({ provider: params.provider, model: params.model });
+  if (assistantFamily && callFamily && assistantFamily !== callFamily) {
+    return dropCacheFields(usage);
+  }
+  return usage;
 }
 
 function parsePromptCacheTouchTimestamp(value: unknown): number | null {
@@ -150,12 +278,21 @@ export function buildLoopPromptCacheInfo(params: {
   prePromptMessageCount: number;
   retention?: "none" | "short" | "long";
   fallbackLastCacheTouchAt?: number | null;
+  provider?: string;
+  model?: string;
 }): EmbeddedRunAttemptResult["promptCache"] {
-  const currentAttemptAssistant = findCurrentAttemptAssistantMessage({
-    messagesSnapshot: params.messagesSnapshot,
+  const latestAssistant = findLatestAssistantMessage(params.messagesSnapshot);
+  const currentAttemptAssistant =
+    latestAssistant && latestAssistant.index >= Math.max(0, params.prePromptMessageCount)
+      ? latestAssistant.message
+      : undefined;
+  const lastCallUsage = resolveSafeLastCallUsage({
+    assistant: latestAssistant?.message,
+    assistantIndex: latestAssistant?.index ?? -1,
     prePromptMessageCount: params.prePromptMessageCount,
+    provider: params.provider,
+    model: params.model,
   });
-  const lastCallUsage = normalizeUsage(currentAttemptAssistant?.usage);
 
   return buildContextEnginePromptCacheInfo({
     retention: params.retention,

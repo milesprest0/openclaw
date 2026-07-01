@@ -9,6 +9,7 @@ import { sendMessageSlack } from "./send.js";
 import { normalizeSlackThreadTsCandidate } from "./thread-ts.js";
 
 const SLACK_SUBAGENT_PROGRESS_TICK_INTERVAL_MS = 5 * 60_000;
+const SLACK_SUBAGENT_PROGRESS_TICKER_MAX_AGE_MS = 60 * 60_000;
 
 type SlackSubagentOrigin = {
   channel: "slack";
@@ -18,8 +19,10 @@ type SlackSubagentOrigin = {
 };
 
 type SlackSubagentState = {
+  childSessionKey: string;
   origin: SlackSubagentOrigin;
   spawnedAt: number;
+  runId?: string;
   label?: string;
   agentId?: string;
   ticker?: ReturnType<typeof setInterval>;
@@ -37,7 +40,9 @@ type SlackSubagentSpawningEvent = {
   agentId?: string;
 };
 
-type SlackSubagentSpawnedEvent = SlackSubagentSpawningEvent;
+type SlackSubagentSpawnedEvent = SlackSubagentSpawningEvent & {
+  runId?: string;
+};
 
 type SlackSubagentDeliveryTargetEvent = {
   childSessionKey: string;
@@ -63,11 +68,64 @@ type SlackSubagentDeliveryTargetResult =
 
 type SlackSubagentEndedEvent = {
   targetSessionKey: string;
+  runId?: string;
   outcome?: "ok" | "error" | "timeout" | "killed" | "reset" | "deleted";
   error?: string;
 };
 
 const slackSubagentStateBySessionKey = new Map<string, SlackSubagentState>();
+const slackSubagentSessionKeyByRunId = new Map<string, string>();
+
+function clearSlackSubagentRunAlias(runId?: string) {
+  const normalizedRunId = normalizeOptionalString(runId);
+  if (!normalizedRunId) {
+    return;
+  }
+  slackSubagentSessionKeyByRunId.delete(normalizedRunId);
+}
+
+function removeSlackSubagentStateBySessionKey(sessionKey: string) {
+  const state = slackSubagentStateBySessionKey.get(sessionKey);
+  if (!state) {
+    return undefined;
+  }
+  clearSlackSubagentTicker(state);
+  slackSubagentStateBySessionKey.delete(sessionKey);
+  clearSlackSubagentRunAlias(state.runId);
+  return state;
+}
+
+function resolveSlackSubagentEndedState(event: SlackSubagentEndedEvent):
+  | {
+      sessionKey: string;
+      state: SlackSubagentState;
+    }
+  | undefined {
+  const direct = slackSubagentStateBySessionKey.get(event.targetSessionKey);
+  if (direct) {
+    return {
+      sessionKey: event.targetSessionKey,
+      state: direct,
+    };
+  }
+  const runId = normalizeOptionalString(event.runId);
+  if (!runId) {
+    return undefined;
+  }
+  const sessionKey = slackSubagentSessionKeyByRunId.get(runId);
+  if (!sessionKey) {
+    return undefined;
+  }
+  const state = slackSubagentStateBySessionKey.get(sessionKey);
+  if (!state) {
+    slackSubagentSessionKeyByRunId.delete(runId);
+    return undefined;
+  }
+  return {
+    sessionKey,
+    state,
+  };
+}
 
 function resolveSlackOriginFromRequester(params: {
   cfg?: Parameters<typeof resolveSlackAccount>[0]["cfg"];
@@ -175,6 +233,10 @@ function maybeStartSlackSubagentTicker(params: {
   }
   clearSlackSubagentTicker(params.state);
   const ticker = setInterval(() => {
+    if (Date.now() - params.state.spawnedAt > SLACK_SUBAGENT_PROGRESS_TICKER_MAX_AGE_MS) {
+      removeSlackSubagentStateBySessionKey(params.state.childSessionKey);
+      return;
+    }
     const elapsedMinutes = Math.max(1, Math.floor((Date.now() - params.state.spawnedAt) / 60_000));
     void sendSlackSubagentThreadMessage({
       api: params.api,
@@ -191,12 +253,14 @@ function maybeStartSlackSubagentTicker(params: {
 export async function handleSlackSubagentSpawning(event: SlackSubagentSpawningEvent) {
   const origin = resolveSlackOriginFromRequester({ requester: event.requester });
   if (!origin) {
-    slackSubagentStateBySessionKey.delete(event.childSessionKey);
+    removeSlackSubagentStateBySessionKey(event.childSessionKey);
     return undefined;
   }
   const existing = slackSubagentStateBySessionKey.get(event.childSessionKey);
   clearSlackSubagentTicker(existing);
+  clearSlackSubagentRunAlias(existing?.runId);
   slackSubagentStateBySessionKey.set(event.childSessionKey, {
+    childSessionKey: event.childSessionKey,
     origin,
     spawnedAt: Date.now(),
     label: normalizeOptionalString(event.label),
@@ -214,13 +278,19 @@ export async function handleSlackSubagentSpawned(
     return;
   }
   const existing = slackSubagentStateBySessionKey.get(event.childSessionKey);
+  clearSlackSubagentRunAlias(existing?.runId);
   const state: SlackSubagentState = {
+    childSessionKey: event.childSessionKey,
     origin,
     spawnedAt: existing?.spawnedAt ?? Date.now(),
+    runId: normalizeOptionalString(event.runId) ?? existing?.runId,
     label: normalizeOptionalString(event.label) ?? existing?.label,
     agentId: normalizeOptionalString(event.agentId) ?? existing?.agentId,
   };
   slackSubagentStateBySessionKey.set(event.childSessionKey, state);
+  if (state.runId) {
+    slackSubagentSessionKeyByRunId.set(state.runId, event.childSessionKey);
+  }
   const label = buildSubagentLabel({ label: state.label, agentId: state.agentId });
   try {
     await sendSlackSubagentThreadMessage({
@@ -269,12 +339,14 @@ export async function handleSlackSubagentEnded(
   api: OpenClawPluginApi,
   event: SlackSubagentEndedEvent,
 ) {
-  const state = slackSubagentStateBySessionKey.get(event.targetSessionKey);
+  const resolved = resolveSlackSubagentEndedState(event);
+  if (!resolved) {
+    return;
+  }
+  const state = removeSlackSubagentStateBySessionKey(resolved.sessionKey);
   if (!state) {
     return;
   }
-  clearSlackSubagentTicker(state);
-  slackSubagentStateBySessionKey.delete(event.targetSessionKey);
   const label = buildSubagentLabel({ label: state.label, agentId: state.agentId });
   try {
     await sendSlackSubagentThreadMessage({
@@ -297,5 +369,6 @@ export const __testing = {
       clearSlackSubagentTicker(state);
     }
     slackSubagentStateBySessionKey.clear();
+    slackSubagentSessionKeyByRunId.clear();
   },
 };

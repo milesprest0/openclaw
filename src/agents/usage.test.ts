@@ -5,6 +5,7 @@ import {
   deriveSessionTotalTokens,
   hasNonzeroUsage,
   normalizeUsage,
+  providerFamily,
   sanitizePerCallCacheUsage,
   toOpenAiChatCompletionsUsage,
 } from "./usage.js";
@@ -349,5 +350,18 @@ describe("deriveSessionTotalTokens", () => {
       promptTokens: 2500, // Override
     });
     expect(totalTokens).toBe(2500);
+  });
+});
+
+describe("providerFamily", () => {
+  it("matches the telemetry audit mapping", () => {
+    expect(providerFamily("anthropic/claude-opus-4-6")).toBe("anthropic");
+    expect(providerFamily("google/gemini-3.5-flash")).toBe("google");
+    expect(providerFamily("openai/gpt-5.5")).toBe("openai");
+    expect(providerFamily("x-ai/grok-4")).toBe("xai");
+    expect(providerFamily("minimax/minimax-m1")).toBe("minimax");
+    expect(providerFamily("deepseek/deepseek-chat")).toBe("deepseek");
+    expect(providerFamily("qwen/qwen-plus")).toBe("qwen");
+    expect(providerFamily("meta/llama-3.3-70b")).toBe("meta");
   });
 });

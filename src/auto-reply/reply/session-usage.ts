@@ -2,6 +2,7 @@ import { setCliSessionBinding, setCliSessionId } from "../../agents/cli-session.
 import {
   deriveSessionTotalTokens,
   hasNonzeroUsage,
+  providerFamily,
   sanitizePerCallCacheUsage,
   type NormalizedUsage,
 } from "../../agents/usage.js";
@@ -75,6 +76,17 @@ function estimateSessionRunCostUsd(params: {
   return resolveNonNegativeNumber(estimateUsageCost({ usage: params.usage, cost }));
 }
 
+function resolveCallFamily(params: { provider?: string; model?: string }): string | undefined {
+  const provider = params.provider?.trim();
+  const model = params.model?.trim();
+  if (!provider && !model) {
+    return undefined;
+  }
+  return providerFamily(
+    [provider, model].filter((value): value is string => Boolean(value)).join("/"),
+  );
+}
+
 function buildPromptInstrumentationRecord(params: {
   sessionKey: string;
   sessionId: string;
@@ -136,6 +148,7 @@ export async function persistSessionUsageUpdate(params: {
   modelUsed?: string;
   servedModelUsed?: string;
   providerUsed?: string;
+  lastCallUsageFamily?: string;
   contextTokensUsed?: number;
   promptTokens?: number;
   usageIsContextSnapshot?: boolean;
@@ -195,6 +208,31 @@ export async function persistSessionUsageUpdate(params: {
               );
             },
           });
+          const callFamily = resolveCallFamily({
+            provider: params.providerUsed ?? entry.modelProvider,
+            model: params.modelUsed ?? entry.model,
+          });
+          const lastCallUsageFamily =
+            typeof params.lastCallUsageFamily === "string" &&
+            params.lastCallUsageFamily.trim().length > 0
+              ? params.lastCallUsageFamily.trim().toLowerCase()
+              : undefined;
+          const shouldDropCrossFamilyCacheUsage =
+            Boolean(lastCallUsageFamily) &&
+            Boolean(callFamily) &&
+            lastCallUsageFamily !== callFamily;
+          const safeLastCallUsageForWrite = shouldDropCrossFamilyCacheUsage
+            ? {
+                ...safeLastCallUsage,
+                cacheRead: undefined,
+                cacheWrite: undefined,
+              }
+            : safeLastCallUsage;
+          if (shouldDropCrossFamilyCacheUsage) {
+            logVerbose(
+              `dropping cross-family last-call cache usage family=${lastCallUsageFamily} callFamily=${callFamily}`,
+            );
+          }
           const patch: Partial<SessionEntry> = {
             modelProvider: params.providerUsed ?? entry.modelProvider,
             model: params.modelUsed ?? entry.model,
@@ -206,8 +244,8 @@ export async function persistSessionUsageUpdate(params: {
           if (hasUsage) {
             patch.inputTokens = params.usage?.input ?? 0;
             patch.outputTokens = params.usage?.output ?? 0;
-            patch.cacheRead = safeLastCallUsage?.cacheRead ?? 0;
-            patch.cacheWrite = safeLastCallUsage?.cacheWrite ?? 0;
+            patch.cacheRead = safeLastCallUsageForWrite?.cacheRead ?? 0;
+            patch.cacheWrite = safeLastCallUsageForWrite?.cacheWrite ?? 0;
           }
           // Snapshot cost like tokens (runEstimatedCostUsd is already computed from
           // cumulative run usage, so assign directly instead of accumulating).
@@ -228,10 +266,14 @@ export async function persistSessionUsageUpdate(params: {
               model: params.modelUsed ?? entry.model,
               provider: params.providerUsed ?? entry.modelProvider,
               promptTokens: params.promptTokens,
-              lastCallInput: safeLastCallUsage?.input,
-              lastCallOutput: safeLastCallUsage?.output,
-              cacheRead: safeLastCallUsage?.cacheRead ?? 0,
-              cacheWrite: safeLastCallUsage?.cacheWrite ?? 0,
+              lastCallInput: safeLastCallUsageForWrite?.input,
+              lastCallOutput: safeLastCallUsageForWrite?.output,
+              ...(typeof safeLastCallUsageForWrite?.cacheRead === "number"
+                ? { cacheRead: safeLastCallUsageForWrite.cacheRead }
+                : {}),
+              ...(typeof safeLastCallUsageForWrite?.cacheWrite === "number"
+                ? { cacheWrite: safeLastCallUsageForWrite.cacheWrite }
+                : {}),
               accumInput: params.usage?.input,
               accumOutput: params.usage?.output,
               contextMax: resolvedContextTokens,
