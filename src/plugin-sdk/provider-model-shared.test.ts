@@ -276,18 +276,28 @@ describe("resolveClaudeThinkingProfile", () => {
     expect(fixedBudgetLevels).toEqual([]);
   });
 
-  it("Sonnet 5 uses the base thinking profile (no adaptive/xhigh until confirmed)", () => {
-    // DECISION 2026-07-01: sonnet-5's adaptive-thinking support is UNVERIFIED, so
-    // it is intentionally NOT added to CLAUDE_ADAPTIVE_THINKING_DEFAULT_MODEL_PREFIXES.
-    // Advertising `adaptive`/`xhigh` for a model that may not support it risks an
-    // API error; omitting it degrades safely to standard levels. Flip this test if
-    // Miles confirms sonnet-5 adaptive support.
+  it("Sonnet 5 offers xhigh+max and defaults to max (Miles 2026-07-01)", () => {
+    // DECISION 2026-07-01 (Miles: "I always want to use the max thinking level"):
+    // sonnet-5 uses fixed-budget extended thinking (xhigh/max via budget_tokens,
+    // the standard mechanism every thinking-capable Claude supports) and DEFAULTS
+    // to max. `adaptive` remains OFF for sonnet-5 because adaptive support is still
+    // UNVERIFIED and would risk an API error on adaptive requests.
     const profile = resolveClaudeThinkingProfile("claude-sonnet-5");
 
-    const advancedLevels = profile.levels.filter(
-      (level) => level.id === "adaptive" || level.id === "xhigh" || level.id === "max",
-    );
-    expect(advancedLevels).toEqual([]);
+    expect(profile).toMatchObject({
+      levels: expect.arrayContaining([{ id: "xhigh" }, { id: "max" }]),
+      defaultLevel: "max",
+    });
+    // adaptive stays off for sonnet-5 until confirmed.
+    expect(profile.levels.filter((level) => level.id === "adaptive")).toEqual([]);
+  });
+
+  it("Sonnet 5 does not advertise adaptive (unverified)", () => {
+    const profile = resolveClaudeThinkingProfile("claude-sonnet-5");
+
+    // adaptive stays off (unverified) even though fixed-budget xhigh/max are on.
+    const adaptiveLevels = profile.levels.filter((level) => level.id === "adaptive");
+    expect(adaptiveLevels).toEqual([]);
     expect(profile.defaultLevel).not.toBe("adaptive");
   });
 });

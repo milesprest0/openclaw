@@ -85,6 +85,12 @@ export {
 import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 
 const CLAUDE_OPUS_47_MODEL_PREFIXES = ["claude-opus-4-7", "claude-opus-4.7"] as const;
+// Sonnet 5: adaptive thinking is UNVERIFIED, but fixed-budget extended thinking
+// (the `high`/`xhigh`/`max` rungs) uses the standard budget_tokens mechanism that
+// every thinking-capable Claude model supports. Per Miles (2026-07-01: "I always
+// want to use the max thinking level"), Sonnet 5 offers xhigh+max and defaults to
+// max — NOT adaptive.
+const CLAUDE_MAX_THINKING_DEFAULT_MODEL_PREFIXES = ["claude-sonnet-5"] as const;
 const CLAUDE_ADAPTIVE_THINKING_DEFAULT_MODEL_PREFIXES = [
   "claude-opus-4-6",
   "claude-opus-4.6",
@@ -128,11 +134,21 @@ export function isClaudeAdaptiveThinkingDefaultModelId(modelId: string): boolean
   return matchesClaudeModelPrefix(modelId, CLAUDE_ADAPTIVE_THINKING_DEFAULT_MODEL_PREFIXES);
 }
 
+export function isClaudeMaxThinkingDefaultModelId(modelId: string): boolean {
+  return matchesClaudeModelPrefix(modelId, CLAUDE_MAX_THINKING_DEFAULT_MODEL_PREFIXES);
+}
+
 export function resolveClaudeThinkingProfile(modelId: string): ProviderThinkingProfile {
   if (isClaudeOpus47ModelId(modelId)) {
     return {
       levels: [...BASE_CLAUDE_THINKING_LEVELS, { id: "xhigh" }, { id: "adaptive" }, { id: "max" }],
       defaultLevel: "off",
+    };
+  }
+  if (isClaudeMaxThinkingDefaultModelId(modelId)) {
+    return {
+      levels: [...BASE_CLAUDE_THINKING_LEVELS, { id: "xhigh" }, { id: "max" }],
+      defaultLevel: "max",
     };
   }
   if (isClaudeAdaptiveThinkingDefaultModelId(modelId)) {
