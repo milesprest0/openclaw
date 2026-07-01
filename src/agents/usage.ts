@@ -60,6 +60,22 @@ export type AssistantUsageSnapshot = {
   };
 };
 
+// Keep this mapping aligned with scripts/cache-telemetry-audit.mjs.
+export function providerFamily(model: string | null | undefined): string {
+  const m = String(model ?? "").toLowerCase();
+  if (m.includes("anthropic") || m.includes("claude")) return "anthropic";
+  if (m.includes("gemini") || m.includes("google")) return "google";
+  if (m.includes("gpt") || m.includes("openai") || m.includes("o1") || m.includes("o3")) {
+    return "openai";
+  }
+  if (m.includes("grok") || m.includes("x-ai")) return "xai";
+  if (m.includes("minimax")) return "minimax";
+  if (m.includes("deepseek")) return "deepseek";
+  if (m.includes("qwen")) return "qwen";
+  if (m.includes("llama")) return "meta";
+  return m || "(unknown)";
+}
+
 export function makeZeroUsageSnapshot(): AssistantUsageSnapshot {
   return {
     input: 0,
