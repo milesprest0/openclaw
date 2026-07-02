@@ -166,7 +166,7 @@ describe("model-pricing-cache", () => {
       expect.arrayContaining([
         "openai/gpt-5.4",
         "anthropic/claude-sonnet-4-6",
-        "google/gemini-3.1-pro-preview",
+        "google/~google/gemini-pro-latest",
         "anthropic/claude-opus-4-6",
         "xai/grok-4",
         "openrouter/anthropic/claude-opus-4-6",

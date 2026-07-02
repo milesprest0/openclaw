@@ -678,7 +678,7 @@ describe("normalizeCompatibilityConfigValues", () => {
     } as unknown as OpenClawConfig);
 
     expect(res.config.agents?.defaults?.model).toEqual({
-      primary: "google/gemini-3.1-pro-preview",
+      primary: "google/~google/gemini-pro-latest",
       fallbacks: ["google/gemini-3-flash-preview"],
     });
     expect(res.config.agents?.defaults?.agentRuntime).toBeUndefined();
@@ -686,6 +686,9 @@ describe("normalizeCompatibilityConfigValues", () => {
       "google-gemini-cli/gemini-3-pro-preview": { alias: "Gemini CLI" },
       "google/gemini-3.1-pro-preview": {
         alias: "Gemini API",
+      },
+      "google/~google/gemini-pro-latest": {
+        alias: "Gemini CLI",
         agentRuntime: { id: "google-gemini-cli" },
       },
       "google/gemini-3-flash-preview": {

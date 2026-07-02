@@ -302,7 +302,7 @@ describe("promptDefaultModel", () => {
     expect(optionValues).toEqual([
       "openai/gpt-5.5",
       "anthropic/claude-sonnet-4-6",
-      "google/gemini-3.1-pro-preview",
+      "google/~google/gemini-pro-latest",
       "openai-codex/gpt-5.5",
     ]);
   });
@@ -323,13 +323,13 @@ describe("promptDefaultModel", () => {
       ignoreAllowlist: true,
     });
 
-    expect(result.model).toBe("google/gemini-3.1-pro-preview");
+    expect(result.model).toBe("google/~google/gemini-pro-latest");
     expect(select.mock.calls[0]?.[0]?.options).toEqual([
-      expect.objectContaining({ value: "google/gemini-3.1-pro-preview" }),
+      expect.objectContaining({ value: "google/~google/gemini-pro-latest" }),
     ]);
     expect(runProviderModelSelectedHook).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: "google/gemini-3.1-pro-preview",
+        model: "google/~google/gemini-pro-latest",
       }),
     );
   });
@@ -1294,7 +1294,7 @@ describe("runtime model picker visibility", () => {
     expect(optionValues).toEqual([
       "openai/gpt-5.5",
       "anthropic/claude-sonnet-4-6",
-      "google/gemini-3.1-pro-preview",
+      "google/~google/gemini-pro-latest",
     ]);
     expect(call?.initialValues).toEqual(["openai/gpt-5.5"]);
   });
@@ -1368,8 +1368,8 @@ describe("applyModelAllowlist", () => {
       "openrouter/google/gemini-3-pro-preview",
     ]);
     expect(next.agents?.defaults?.models).toEqual({
-      "google/gemini-3.1-pro-preview": { alias: "gemini" },
-      "google-gemini-cli/gemini-3.1-pro-preview": {},
+      "google/~google/gemini-pro-latest": {},
+      "google-gemini-cli/~google/gemini-pro-latest": {},
       "openrouter/google/gemini-3-pro-preview": {},
     });
   });
@@ -1496,7 +1496,7 @@ describe("applyModelFallbacksFromSelection", () => {
     ]);
     expect(next.agents?.defaults?.model).toEqual({
       primary: "openai/gpt-5.5",
-      fallbacks: ["google/gemini-3.1-pro-preview"],
+      fallbacks: ["google/~google/gemini-pro-latest"],
     });
   });
 
@@ -1517,7 +1517,7 @@ describe("applyModelFallbacksFromSelection", () => {
       "openai/gpt-5.5",
     ]);
     expect(next.agents?.defaults?.model).toEqual({
-      primary: "google/gemini-3.1-pro-preview",
+      primary: "google/~google/gemini-pro-latest",
       fallbacks: ["openai/gpt-5.5"],
     });
   });
@@ -1597,7 +1597,7 @@ describe("applyModelFallbacksFromSelection", () => {
     });
     expect(next.agents?.defaults?.model).toEqual({
       primary: "anthropic/claude-opus-4-6",
-      fallbacks: ["google/gemini-3.1-pro-preview"],
+      fallbacks: ["google/~google/gemini-pro-latest"],
     });
   });
 
