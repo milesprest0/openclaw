@@ -485,4 +485,56 @@ describe("createAcpVisibleTextAccumulator", () => {
       delta: "Actual answer",
     });
   });
+
+  it("buffers a single leading N token fragment before deciding visibility", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    expect(acc.consume("N")).toBeNull();
+    expect(acc.consume("O_REPLY")).toBeNull();
+    expect(acc.consume("Hey there!")).toEqual({
+      text: "Hey there!",
+      delta: "Hey there!",
+    });
+    expect(acc.finalize()).toBe("Hey there!");
+  });
+
+  it("passes a short greeting completion through unmodified", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    expect(acc.consume("hey")).toEqual({ text: "hey", delta: "hey" });
+    expect(acc.finalize()).toBe("hey");
+    expect(acc.finalizeRaw()).toBe("hey");
+  });
+
+  it("does not buffer a capital-N greeting streamed as a single chunk", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    expect(acc.consume("Nice to meet you!")).toEqual({
+      text: "Nice to meet you!",
+      delta: "Nice to meet you!",
+    });
+    expect(acc.finalize()).toBe("Nice to meet you!");
+  });
+
+  it("reconstructs a capital-N greeting split across chunks without a stray N", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    // Provider streams the leading capital letter as its own token.
+    expect(acc.consume("N")).toBeNull();
+    expect(acc.consume("ice to meet you!")).toEqual({
+      text: "Nice to meet you!",
+      delta: "Nice to meet you!",
+    });
+    expect(acc.finalize()).toBe("Nice to meet you!");
+  });
+
+  it("never leaks a stray N when only a lone silent-token fragment is streamed", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    // A bare buffered "N" that never resolves to NO_REPLY must not surface as
+    // a stray single-character reply.
+    expect(acc.consume("N")).toBeNull();
+    expect(acc.finalize()).toBe("");
+    expect(acc.finalizeRaw()).toBe("");
+  });
 });
