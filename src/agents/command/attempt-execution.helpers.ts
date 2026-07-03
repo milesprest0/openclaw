@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import {
-  isSilentReplyPrefixText,
   isSilentReplyText,
   SILENT_REPLY_TOKEN,
   startsWithSilentToken,
@@ -286,7 +285,26 @@ export function createAcpVisibleTextAccumulator() {
   let visibleText = "";
   let rawVisibleText = "";
   const startsWithWordChar = (chunk: string): boolean => /^[\p{L}\p{N}]/u.test(chunk);
-  const tokenLead = SILENT_REPLY_TOKEN[0]?.toUpperCase() ?? "N";
+  // Decide whether a leading fragment could still be the start of a streamed
+  // silent token (for example "N", "NO", "NO_" for NO_REPLY). Only genuine
+  // all-uppercase prefixes of the token qualify. Anything containing lowercase,
+  // whitespace, punctuation, or digits is real visible content — most notably a
+  // short greeting reply like "Nice to meet you!" — and must never be buffered
+  // or suppressed, so a short completion is never mangled into a stray "N".
+  const couldBecomeSilentToken = (candidate: string): boolean => {
+    const trimmed = candidate.trim();
+    if (!trimmed) {
+      return false;
+    }
+    const upper = trimmed.toUpperCase();
+    if (trimmed !== upper || /[^A-Z_]/.test(upper)) {
+      return false;
+    }
+    const tokenUpper = SILENT_REPLY_TOKEN.toUpperCase();
+    // The exact/complete token is handled by isSilentReplyText; here we only
+    // hold back strict partial prefixes that might still resolve to the token.
+    return upper.length < tokenUpper.length && tokenUpper.startsWith(upper);
+  };
 
   const resolveNextCandidate = (base: string, chunk: string): string => {
     if (!base) {
@@ -330,8 +348,7 @@ export function createAcpVisibleTextAccumulator() {
         const trimmedLeadCandidate = leadCandidate.trim();
         if (
           isSilentReplyText(trimmedLeadCandidate, SILENT_REPLY_TOKEN) ||
-          isSilentReplyPrefixText(trimmedLeadCandidate, SILENT_REPLY_TOKEN) ||
-          trimmedLeadCandidate.toUpperCase() === tokenLead
+          couldBecomeSilentToken(trimmedLeadCandidate)
         ) {
           pendingSilentPrefix = leadCandidate;
           return null;
