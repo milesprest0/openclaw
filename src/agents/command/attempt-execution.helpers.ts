@@ -286,6 +286,7 @@ export function createAcpVisibleTextAccumulator() {
   let visibleText = "";
   let rawVisibleText = "";
   const startsWithWordChar = (chunk: string): boolean => /^[\p{L}\p{N}]/u.test(chunk);
+  const tokenLead = SILENT_REPLY_TOKEN[0]?.toUpperCase() ?? "N";
 
   const resolveNextCandidate = (base: string, chunk: string): string => {
     if (!base) {
@@ -329,7 +330,8 @@ export function createAcpVisibleTextAccumulator() {
         const trimmedLeadCandidate = leadCandidate.trim();
         if (
           isSilentReplyText(trimmedLeadCandidate, SILENT_REPLY_TOKEN) ||
-          isSilentReplyPrefixText(trimmedLeadCandidate, SILENT_REPLY_TOKEN)
+          isSilentReplyPrefixText(trimmedLeadCandidate, SILENT_REPLY_TOKEN) ||
+          trimmedLeadCandidate.toUpperCase() === tokenLead
         ) {
           pendingSilentPrefix = leadCandidate;
           return null;

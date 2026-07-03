@@ -485,4 +485,16 @@ describe("createAcpVisibleTextAccumulator", () => {
       delta: "Actual answer",
     });
   });
+
+  it("buffers a single leading N token fragment before deciding visibility", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    expect(acc.consume("N")).toBeNull();
+    expect(acc.consume("O_REPLY")).toBeNull();
+    expect(acc.consume("Hey there!")).toEqual({
+      text: "Hey there!",
+      delta: "Hey there!",
+    });
+    expect(acc.finalize()).toBe("Hey there!");
+  });
 });

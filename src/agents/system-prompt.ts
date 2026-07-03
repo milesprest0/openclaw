@@ -843,6 +843,9 @@ export function buildAgentSystemPrompt(params: {
 
   const normalizedTools = canonicalToolNames.map((tool) => tool.toLowerCase());
   const availableTools = new Set(normalizedTools);
+  const videoGenerationUnavailableClarifier = availableTools.has("video_generate")
+    ? null
+    : "If asked to produce a finished video file, state clearly in one line that this environment can draft scripts/storyboards/shot lists but cannot render or export a finished video file here.";
   const hasSessionsSpawn = availableTools.has("sessions_spawn");
   const acpHarnessSpawnAllowed = hasSessionsSpawn && acpSpawnRuntimeEnabled;
   const nativeCommandGuidanceLines = Array.from(
@@ -1050,6 +1053,7 @@ export function buildAgentSystemPrompt(params: {
             "- subagents: list/steer/kill sub-agent runs",
             '- session_status: show usage/time/model state and answer "what model are we using?"',
           ].join("\n"),
+      ...(videoGenerationUnavailableClarifier ? [videoGenerationUnavailableClarifier] : []),
       "TOOLS.md does not control tool availability; it is user guidance for how to use external tools.",
       `For long waits, avoid rapid poll loops: use ${execToolName} with enough yieldMs or ${processToolName}(action=poll, timeout=<ms>).`,
       "If a task is more complex or takes longer, spawn a sub-agent. Completion is push-based: it will auto-announce when done.",
