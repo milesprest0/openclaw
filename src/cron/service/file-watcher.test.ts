@@ -90,11 +90,18 @@ describe("startCronStoreWatcher (PRE-176)", () => {
   let storePath: string;
 
   beforeEach(() => {
+    // Defensive: a sibling test file in the same shard worker may leave
+    // vi.useFakeTimers() active without restoring it. This file is the only
+    // one that awaits real setTimeout/debounce progress, so a leaked fake
+    // clock freezes it to the full test timeout. Force real timers here so
+    // these tests are hermetic regardless of shard ordering.
+    vi.useRealTimers();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cron-watcher-test-"));
     storePath = path.join(tmpDir, "jobs.json");
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch {
