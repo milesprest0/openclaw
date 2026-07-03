@@ -7,7 +7,37 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startCronStoreWatcher } from "./file-watcher.js";
+import type { CronFsWatchFactory } from "./file-watcher.js";
 import { createCronServiceState } from "./state.js";
+
+/**
+ * Deterministic watch factory: captures the change callback so the test can
+ * fire synthetic fs events on demand, instead of depending on native
+ * `fs.watch` event delivery (which is environment-flaky under loaded CI shards).
+ */
+function createControllableWatch(): {
+  factory: CronFsWatchFactory;
+  fire: () => void;
+  closed: () => boolean;
+} {
+  let onChange: (() => void) | null = null;
+  let isClosed = false;
+  const factory: CronFsWatchFactory = (_storePath, cb) => {
+    onChange = cb;
+    return {
+      close: () => {
+        isClosed = true;
+      },
+      unref: () => {},
+      on: () => {},
+    };
+  };
+  return {
+    factory,
+    fire: () => onChange?.(),
+    closed: () => isClosed,
+  };
+}
 
 type MockLog = {
   info: ReturnType<typeof vi.fn>;
@@ -95,16 +125,20 @@ describe("startCronStoreWatcher (PRE-176)", () => {
   it("debounces rapid file edits into a single reload attempt", async () => {
     fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
     const { state, log } = createStateForPath(storePath);
-    const handle = startCronStoreWatcher(state, { debounceMs: 50 });
+    const watch = createControllableWatch();
+    const handle = startCronStoreWatcher(state, {
+      debounceMs: 50,
+      watchFactory: watch.factory,
+    });
     expect(handle).not.toBeNull();
 
     try {
-      // Three rapid edits within the debounce window.
-      fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
-      await new Promise((r) => setTimeout(r, 5));
-      fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
-      await new Promise((r) => setTimeout(r, 5));
-      fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
+      // Three rapid change events within the debounce window — driven
+      // deterministically so the test does not depend on native fs.watch
+      // event delivery (flaky under loaded CI shards).
+      watch.fire();
+      watch.fire();
+      watch.fire();
 
       // ensureLoaded will fail because the mock state is missing real deps —
       // we assert the reload PATH fires (either info hot-reloaded or warn
@@ -117,11 +151,11 @@ describe("startCronStoreWatcher (PRE-176)", () => {
           log.warn.mock.calls.some(
             (c) => typeof c[1] === "string" && c[1].includes("hot-reload failed"),
           ),
-        { timeoutMs: 10000 },
+        { timeoutMs: 5000 },
       );
 
       // Count how many reload attempts fired in total — should be <= 2
-      // (debounce collapses the 3 rapid edits into 1, and a second event can
+      // (debounce collapses the 3 rapid events into 1; a second event can
       // arrive from the editor-level rename replay on some platforms).
       const reloadCalls =
         log.info.mock.calls.filter(
@@ -139,15 +173,19 @@ describe("startCronStoreWatcher (PRE-176)", () => {
   it("suppressFor() skips reloads triggered during the suppression window", async () => {
     fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
     const { state, log } = createStateForPath(storePath);
-    const handle = startCronStoreWatcher(state, { debounceMs: 20 });
+    const watch = createControllableWatch();
+    const handle = startCronStoreWatcher(state, {
+      debounceMs: 20,
+      watchFactory: watch.factory,
+    });
     expect(handle).not.toBeNull();
 
     try {
-      // Mark the next 500ms as self-write; any edit within this window must
+      // Mark the next 500ms as self-write; any event within this window must
       // not trigger a reload.
       handle!.suppressFor(500);
 
-      fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
+      watch.fire();
       // Give debounce + scheduler a chance to fire.
       await new Promise((r) => setTimeout(r, 100));
 

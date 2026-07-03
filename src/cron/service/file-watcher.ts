@@ -43,8 +43,30 @@ export type CronFileWatcherHandle = {
   suppressFor: (ms?: number) => void;
 };
 
+/**
+ * Minimal surface of the fs watcher the cron store relies on. Kept narrow so
+ * tests can inject a deterministic fake instead of depending on native
+ * `fs.watch` event delivery (which is environment-flaky under heavily loaded
+ * CI shards and does not reliably deliver events on all container filesystems).
+ */
+export type CronFsWatchLike = {
+  close: () => void;
+  unref?: () => void;
+  on?: (event: "error", listener: (err: unknown) => void) => void;
+};
+
+export type CronFsWatchFactory = (storePath: string, onChange: () => void) => CronFsWatchLike;
+
+const defaultWatchFactory: CronFsWatchFactory = (storePath, onChange) =>
+  fs.watch(storePath, { persistent: false }, () => onChange());
+
 export type CronFileWatcherOptions = {
   debounceMs?: number;
+  /**
+   * Test-only seam: supply a deterministic watch factory. Defaults to the
+   * native `fs.watch`. Production callers never pass this.
+   */
+  watchFactory?: CronFsWatchFactory;
 };
 
 /**
@@ -104,9 +126,10 @@ export function startCronStoreWatcher(
     state.op = reloadPromise;
   };
 
-  let watcher: fs.FSWatcher | null = null;
+  const watchFactory = options.watchFactory ?? defaultWatchFactory;
+  let watcher: CronFsWatchLike | null = null;
   try {
-    watcher = fs.watch(storePath, { persistent: false }, () => {
+    watcher = watchFactory(storePath, () => {
       if (closed) {
         return;
       }
@@ -130,9 +153,11 @@ export function startCronStoreWatcher(
   // the renamed-over file would still surface through fs.watch on the path
   // on most platforms. For maximum robustness we also swallow any error
   // bubbled by the watcher itself.
-  watcher.on("error", (err) => {
-    log.warn({ storePath, err: String(err) }, "cron: fs.watch emitted error (continuing)");
-  });
+  if (typeof watcher.on === "function") {
+    watcher.on("error", (err) => {
+      log.warn({ storePath, err: String(err) }, "cron: fs.watch emitted error (continuing)");
+    });
+  }
 
   log.info({ storePath, debounceMs }, "cron: file watcher started (hot-reload on external edits)");
 
