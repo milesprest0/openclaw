@@ -151,9 +151,9 @@ describe("config io write prepare", () => {
       nextConfig: {
         agents: {
           defaults: {
-            model: { primary: "google/gemini-3.1-pro-preview" },
+            model: { primary: "google/~google/gemini-pro-latest" },
             models: {
-              "google/gemini-3.1-pro-preview": {},
+              "google/~google/gemini-pro-latest": {},
             },
           },
         },
@@ -161,10 +161,10 @@ describe("config io write prepare", () => {
     }) as OpenClawConfig;
 
     expect(persisted.agents?.defaults?.model).toEqual({
-      primary: "google/gemini-3.1-pro-preview",
+      primary: "google/~google/gemini-pro-latest",
     });
     expect(persisted.agents?.defaults?.models).not.toHaveProperty("google/gemini-3-pro-preview");
-    expect(persisted.agents?.defaults?.models?.["google/gemini-3.1-pro-preview"]).toEqual({
+    expect(persisted.agents?.defaults?.models?.["google/~google/gemini-pro-latest"]).toEqual({
       params: { thinking: { level: "high" } },
     });
   });

@@ -578,16 +578,23 @@ export async function resolveReplyDirectives(params: {
       });
   provider = modelState.provider;
   model = modelState.model;
-  const rawResolvedThinkLevelWithDefault =
+  // A think level is considered "resolved from a real source" when it came from an
+  // inline directive, the target session, the model's resolved default, or the agent
+  // config default. Only when NONE of those produce a value do we let the adaptive
+  // heuristic pick a smart default from the message text; otherwise an explicit choice
+  // (e.g. a session's `high`) or a model default (e.g. `low`) would be clobbered by a
+  // "trivial"-looking body like "hello".
+  const sourcedThinkLevel =
     resolvedThinkLevel ??
     (await modelState.resolveDefaultThinkingLevel()) ??
-    (agentCfg?.thinkingDefault as ThinkLevel | undefined) ??
-    "off";
+    (agentCfg?.thinkingDefault as ThinkLevel | undefined);
 
-  const resolvedThinkLevelWithDefault = adaptiveThinkingLevelOverride(
-    commandText,
-    rawResolvedThinkLevelWithDefault,
-  );
+  const rawResolvedThinkLevelWithDefault = sourcedThinkLevel ?? "off";
+
+  const resolvedThinkLevelWithDefault =
+    sourcedThinkLevel !== undefined
+      ? rawResolvedThinkLevelWithDefault
+      : adaptiveThinkingLevelOverride(commandText, rawResolvedThinkLevelWithDefault);
 
   const thinkingExplicitlySet =
     directives.thinkLevel !== undefined ||

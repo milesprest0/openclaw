@@ -138,11 +138,11 @@ describe("plugin activation boundary", () => {
     const staticNormalize = { allowPluginNormalization: false };
     expect(normalizeModelRef("google", "gemini-3.1-pro", staticNormalize)).toEqual({
       provider: "google",
-      model: "gemini-3.1-pro-preview",
+      model: "~google/gemini-pro-latest",
     });
     expect(normalizeModelRef("google", "gemini-3-pro-preview", staticNormalize)).toEqual({
       provider: "google",
-      model: "gemini-3.1-pro-preview",
+      model: "~google/gemini-pro-latest",
     });
     expect(normalizeModelRef("xai", "grok-4-fast-reasoning", staticNormalize)).toEqual({
       provider: "xai",

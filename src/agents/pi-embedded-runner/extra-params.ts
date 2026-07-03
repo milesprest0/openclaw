@@ -710,7 +710,7 @@ function createAnthropicHistoryCacheBreakpointsWrapper(
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) =>
     underlying(model, context, {
-      ...(options ?? {}),
+      ...options,
       historyCacheBreakpoints: mode,
     } as typeof options & { historyCacheBreakpoints: AnthropicHistoryCacheBreakpointsMode });
 }

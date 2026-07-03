@@ -126,11 +126,11 @@ describe("applyProviderAuthConfigPatch", () => {
     const next = applyProviderAuthConfigPatch({}, patch);
 
     expect(next.agents?.defaults?.model).toEqual({
-      primary: "google/gemini-3.1-pro-preview",
-      fallbacks: ["google/gemini-3.1-pro-preview", "openai/gpt-5.5"],
+      primary: "google/~google/gemini-pro-latest",
+      fallbacks: ["google/~google/gemini-pro-latest", "openai/gpt-5.5"],
     });
     expect(next.agents?.defaults?.models).toEqual({
-      "google/gemini-3.1-pro-preview": {
+      "google/~google/gemini-pro-latest": {
         alias: "gemini",
         params: { thinking: "high", maxTokens: 12_000 },
       },
@@ -151,7 +151,7 @@ describe("applyProviderAuthConfigPatch", () => {
     const next = applyProviderAuthConfigPatch(base, patch, { replaceDefaultModels: true });
 
     expect(next.agents?.defaults?.models).toEqual({
-      "google/gemini-3.1-pro-preview": {},
+      "google/~google/gemini-pro-latest": {},
     });
   });
 });
@@ -207,7 +207,7 @@ describe("applyDefaultModel", () => {
       preserveExistingPrimary: true,
     });
     expect(next.agents?.defaults?.model).toEqual({
-      primary: "google/gemini-3.1-pro-preview",
+      primary: "google/~google/gemini-pro-latest",
     });
   });
 
@@ -248,11 +248,11 @@ describe("applyDefaultModel", () => {
     } as OpenClawConfig;
     const next = applyDefaultModel(config, "google/gemini-3-pro-preview");
     expect(next.agents?.defaults?.model).toEqual({
-      primary: "google/gemini-3.1-pro-preview",
+      primary: "google/~google/gemini-pro-latest",
     });
     expect(next.agents?.defaults?.models).toEqual({
       "anthropic/claude-sonnet-4-6": {},
-      "google/gemini-3.1-pro-preview": {},
+      "google/~google/gemini-pro-latest": {},
     });
   });
 
@@ -270,7 +270,7 @@ describe("applyDefaultModel", () => {
     const next = applyDefaultModel(config, "openrouter/auto");
     expect(next.agents?.defaults?.model).toEqual({
       primary: "openrouter/auto",
-      fallbacks: ["google/gemini-3.1-pro-preview"],
+      fallbacks: ["google/~google/gemini-pro-latest"],
     });
   });
 });

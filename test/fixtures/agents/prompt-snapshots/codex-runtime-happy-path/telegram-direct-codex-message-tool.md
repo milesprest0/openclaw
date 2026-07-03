@@ -213,8 +213,8 @@ This is the deterministic model-bound layer stack OpenClaw can snapshot for the 
     "roughTokens": 158
   },
   "dynamicToolsJson": {
-    "chars": 49649,
-    "roughTokens": 12413
+    "chars": 45319,
+    "roughTokens": 11330
   },
   "openClawDeveloperInstructions": {
     "chars": 4999,
@@ -225,8 +225,8 @@ This is the deterministic model-bound layer stack OpenClaw can snapshot for the 
     "roughTokens": 6913
   },
   "totalWithDynamicToolsJson": {
-    "chars": 77302,
-    "roughTokens": 19326
+    "chars": 72972,
+    "roughTokens": 18243
   },
   "userInputText": {
     "chars": 370,
@@ -584,37 +584,11 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
           "enum": ["send"],
           "type": "string"
         },
-        "activityName": {
-          "description": "Activity name shown in sidebar (e.g. 'with fire'). Ignored for custom type.",
-          "type": "string"
-        },
-        "activityState": {
-          "description": "State text. For custom type this is the status text; for others it shows in the flyout.",
-          "type": "string"
-        },
-        "activityType": {
-          "description": "Activity type: playing, streaming, listening, watching, competing, custom.",
-          "type": "string"
-        },
-        "activityUrl": {
-          "description": "Streaming URL (Twitch or YouTube). Only used with streaming type; may not render for bots.",
-          "type": "string"
-        },
         "after": {
           "type": "string"
         },
-        "appliedTags": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "around": {
           "type": "string"
-        },
-        "asDocument": {
-          "description": "Send image/GIF as document to avoid Telegram compression. Alias for forceDocument (Telegram only).",
-          "type": "boolean"
         },
         "asVoice": {
           "type": "boolean"
@@ -628,9 +602,6 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
           },
           "type": "array"
         },
-        "autoArchiveMin": {
-          "type": "number"
-        },
         "before": {
           "type": "string"
         },
@@ -638,13 +609,9 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
           "type": "boolean"
         },
         "buffer": {
-          "description": "Base64 payload for attachments (optionally a data: URL).",
           "type": "string"
         },
         "caption": {
-          "type": "string"
-        },
-        "categoryId": {
           "type": "string"
         },
         "channel": {
@@ -665,47 +632,21 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
           "description": "Chat id for chat-scoped metadata actions.",
           "type": "string"
         },
-        "clearParent": {
-          "description": "Clear the parent/category when supported by the provider.",
-          "type": "boolean"
-        },
         "contentType": {
-          "type": "string"
-        },
-        "deleteDays": {
-          "type": "number"
-        },
-        "desc": {
           "type": "string"
         },
         "dryRun": {
           "type": "boolean"
         },
-        "durationMin": {
-          "type": "number"
-        },
-        "effect": {
-          "description": "Alias for effectId (e.g., invisible-ink, balloons).",
-          "type": "string"
-        },
-        "effectId": {
-          "description": "Message effect name/id for sendWithEffect (e.g., invisible ink).",
-          "type": "string"
-        },
         "emoji": {
           "type": "string"
         },
-        "emojiName": {
-          "type": "string"
-        },
-        "endTime": {
-          "type": "string"
-        },
-        "eventName": {
-          "type": "string"
-        },
-        "eventType": {
-          "type": "string"
+        "extra": {
+          "description": "Provider-specific optional args passthrough. Common keys: activityName, activityState, activityType, activityUrl, appliedTags, asDocument, autoArchiveMin, categoryId, clearParent, deleteDays, desc, durationMin, effect, effectId, emojiName, endTime, eventName, eventType, forceDocument, gatewayToken, gatewayUrl, gifPlayback, image, location, name, nsfw, parentId, position, query, quoteText, rateLimitPerUser, reason, startTime, status, stickerDesc, stickerId, stickerName, stickerTags, threadName, timeoutMs, topic, type, until.",
+          "patternProperties": {
+            "^.*$": {}
+          },
+          "type": "object"
         },
         "fileId": {
           "type": "string"
@@ -716,30 +657,13 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
         "filePath": {
           "type": "string"
         },
-        "forceDocument": {
-          "description": "Send image/GIF as document to avoid Telegram compression (Telegram only).",
-          "type": "boolean"
-        },
         "fromMe": {
-          "type": "boolean"
-        },
-        "gatewayToken": {
-          "type": "string"
-        },
-        "gatewayUrl": {
-          "type": "string"
-        },
-        "gifPlayback": {
           "type": "boolean"
         },
         "groupId": {
           "type": "string"
         },
         "guildId": {
-          "type": "string"
-        },
-        "image": {
-          "description": "Cover image URL or local file path for the event.",
           "type": "string"
         },
         "includeArchived": {
@@ -754,11 +678,7 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
         "limit": {
           "type": "number"
         },
-        "location": {
-          "type": "string"
-        },
         "media": {
-          "description": "Media URL or local path. data: URLs are not supported here, use buffer.",
           "type": "string"
         },
         "memberId": {
@@ -774,21 +694,14 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
           "type": "string"
         },
         "message_id": {
-          "description": "snake_case alias of messageId. If omitted for reaction-like actions, defaults to the current inbound message id when available.",
           "type": "string"
         },
         "messageId": {
-          "description": "Target message id for read, reaction, edit, delete, pin, or unpin. If omitted for reaction-like actions, defaults to the current inbound message id when available.",
+          "description": "Target message id for read, reaction, edit, delete, pin, or unpin actions.",
           "type": "string"
         },
         "mimeType": {
           "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "nsfw": {
-          "type": "boolean"
         },
         "openId": {
           "type": "string"
@@ -797,9 +710,6 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
           "type": "number"
         },
         "pageToken": {
-          "type": "string"
-        },
-        "parentId": {
           "type": "string"
         },
         "participant": {
@@ -824,44 +734,24 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
           "type": "array"
         },
         "pollOptionId": {
-          "description": "Poll answer id to vote for. Use when the channel exposes stable answer ids.",
           "type": "string"
         },
         "pollOptionIds": {
           "items": {
-            "description": "Poll answer ids to vote for in a multiselect poll. Use when the channel exposes stable answer ids.",
             "type": "string"
           },
           "type": "array"
         },
         "pollOptionIndex": {
-          "description": "1-based poll option number to vote for, matching the rendered numbered poll choices.",
           "type": "number"
         },
         "pollOptionIndexes": {
           "items": {
-            "description": "1-based poll option numbers to vote for in a multiselect poll, matching the rendered numbered poll choices.",
             "type": "number"
           },
           "type": "array"
         },
         "pollQuestion": {
-          "type": "string"
-        },
-        "position": {
-          "type": "number"
-        },
-        "query": {
-          "type": "string"
-        },
-        "quoteText": {
-          "description": "Quote text for Telegram reply_parameters",
-          "type": "string"
-        },
-        "rateLimitPerUser": {
-          "type": "number"
-        },
-        "reason": {
           "type": "string"
         },
         "remove": {
@@ -885,28 +775,6 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
         "silent": {
           "type": "boolean"
         },
-        "startTime": {
-          "type": "string"
-        },
-        "status": {
-          "description": "Bot status: online, dnd, idle, invisible.",
-          "type": "string"
-        },
-        "stickerDesc": {
-          "type": "string"
-        },
-        "stickerId": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "stickerName": {
-          "type": "string"
-        },
-        "stickerTags": {
-          "type": "string"
-        },
         "target": {
           "description": "Recipient/channel: E.164 for WhatsApp/Signal, Telegram chat id/@username, Discord/Slack/Mattermost <channelId|user:ID|channel:ID>, or iMessage handle/chat_id",
           "type": "string"
@@ -927,30 +795,16 @@ Full JSON: `codex-dynamic-tools.telegram-direct.json`
         "threadId": {
           "type": "string"
         },
-        "threadName": {
-          "type": "string"
-        },
-        "timeoutMs": {
-          "type": "number"
-        },
-        "topic": {
-          "type": "string"
+        "topLevel": {
+          "type": "boolean"
         },
         "track_tool_calls": {
-          "description": "snake_case alias of trackToolCalls.",
           "type": "boolean"
         },
         "trackToolCalls": {
-          "description": "When true for a reaction to the current inbound message, use that reacted message as the status-reaction target for subsequent tool progress when the channel supports it.",
           "type": "boolean"
         },
-        "type": {
-          "type": "number"
-        },
         "unionId": {
-          "type": "string"
-        },
-        "until": {
           "type": "string"
         },
         "userId": {

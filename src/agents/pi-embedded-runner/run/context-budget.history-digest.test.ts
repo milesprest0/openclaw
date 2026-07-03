@@ -36,7 +36,7 @@ function makeAssistantToolUse(params: {
       },
     ],
     timestamp: 0,
-  } as AgentMessage;
+  } as unknown as AgentMessage;
 }
 
 function toolText(message: AgentMessage): string {

@@ -63,7 +63,7 @@ describe("applyAgentDefaultPrimaryModel", () => {
     });
     expect(result.changed).toBe(true);
     expect(result.next.agents?.defaults?.model).toEqual({
-      primary: "google/gemini-3.1-pro-preview",
+      primary: "google/~google/gemini-pro-latest",
     });
   });
 });
