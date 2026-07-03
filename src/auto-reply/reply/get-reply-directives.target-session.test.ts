@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { importFreshModule } from "../../../test/helpers/import-fresh.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import { importFreshModule } from "../../plugin-sdk/test-helpers/import-fresh.js";
 import type { TemplateContext } from "../templating.js";
 import { buildTestCtx } from "./test-ctx.js";
 
@@ -40,13 +40,13 @@ async function loadResolveReplyDirectivesForTest() {
     shouldHandleTextCommands: vi.fn(() => false),
   }));
   vi.doMock("./commands-context.js", () => ({
-    buildCommandContext: vi.fn(() => ({
+    buildCommandContext: vi.fn((params: { commandAuthorized?: boolean }) => ({
       surface: "whatsapp",
       channel: "whatsapp",
       channelId: "whatsapp",
       ownerList: [],
       senderIsOwner: false,
-      isAuthorizedSender: false,
+      isAuthorizedSender: params.commandAuthorized === true,
       senderId: undefined,
       abortKey: "abort-key",
       rawBodyNormalized: "hello",
@@ -191,7 +191,8 @@ describe("resolveReplyDirectives", () => {
       groupResolution: undefined,
       isGroup: false,
       triggerBodyNormalized: "hello",
-      commandAuthorized: false,
+      resetTriggered: false,
+      commandAuthorized: true,
       defaultProvider: "openai",
       defaultModel: "gpt-4o-mini",
       aliasIndex: { byAlias: new Map(), byKey: new Map() },
