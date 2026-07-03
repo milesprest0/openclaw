@@ -709,6 +709,10 @@ describe("createModelSelectionState auto-failover overrides", () => {
       providerOverride: params.providerOverride,
       modelOverride: params.modelOverride,
       modelOverrideSource: params.modelOverrideSource,
+      // Auto pins carry a fresh write timestamp in production
+      // (agent-runner-execution.ts stamps modelOverrideAt = Date.now()); a
+      // timestamp-less auto pin is treated as expired by design.
+      ...(params.modelOverrideSource === "auto" ? { modelOverrideAt: Date.now() } : {}),
     });
     const sessionStore = { [sessionKey]: sessionEntry };
     const state = await createModelSelectionState({
@@ -845,6 +849,8 @@ describe("createModelSelectionState auto-failover overrides", () => {
       providerOverride: "openrouter",
       modelOverride: "minimax/minimax-m2.7",
       modelOverrideSource: "auto",
+      // Fresh auto pin timestamp, matching production write behavior.
+      modelOverrideAt: Date.now(),
     });
     const childEntry = makeEntry(); // no override of its own
     const sessionStore = { [parentKey]: parentEntry, [childKey]: childEntry };
