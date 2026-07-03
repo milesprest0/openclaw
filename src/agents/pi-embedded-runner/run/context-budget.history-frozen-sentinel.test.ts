@@ -11,7 +11,7 @@ function makeUser(text: string): AgentMessage {
 }
 
 function makeAssistant(text: string): AgentMessage {
-  return { role: "assistant", content: text, timestamp: 0 } as AgentMessage;
+  return { role: "assistant", content: text, timestamp: 0 } as unknown as AgentMessage;
 }
 
 function buildConfig(params: {
@@ -71,13 +71,13 @@ function countSentinel(messages: AgentMessage[]): number {
 
 function makeFrozenBoundaryMessages(): AgentMessage[] {
   return [
-    { ...makeUser("old frozen"), frozen: true } as AgentMessage,
+    { ...makeUser("old frozen"), frozen: true } as unknown as AgentMessage,
     {
       role: "assistant",
       content: [{ type: "text", text: "stable boundary" }],
       timestamp: 0,
       frozen: true,
-    } as AgentMessage,
+    } as unknown as AgentMessage,
     {
       role: "assistant",
       content: [

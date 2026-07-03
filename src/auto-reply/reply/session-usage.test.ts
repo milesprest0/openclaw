@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEntry, SessionSystemPromptReport } from "../../config/sessions.js";
+import type { TokenUsageRecord } from "../../logging/token-usage-log.js";
 
 const { logPromptInstrumentationRecordMock, logTokenUsageRecordMock, updateSessionStoreEntryMock } =
   vi.hoisted(() => ({
     logPromptInstrumentationRecordMock: vi.fn(async () => {}),
-    logTokenUsageRecordMock: vi.fn(async () => {}),
+    logTokenUsageRecordMock: vi.fn(async (_record: TokenUsageRecord) => {}),
     updateSessionStoreEntryMock: vi.fn(
       async (_params: {
         update: (entry: SessionEntry) => Promise<Partial<SessionEntry>>;

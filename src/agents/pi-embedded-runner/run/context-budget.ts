@@ -459,7 +459,7 @@ function digestOldToolResultsWithStats(
       if (
         (blockType === "tool_use" || blockType === "toolCall") &&
         opts.freezeMode === "frozen" &&
-        opts.compactToolCallArgs === true
+        opts.compactToolCallArgs
       ) {
         if ((block as { frozen?: unknown }).frozen === true) {
           continue;

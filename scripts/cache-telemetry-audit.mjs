@@ -48,15 +48,30 @@ function parseTs(r) {
 // any nonzero value shared by >=2 families is a carry-forward fabrication.
 function providerFamily(model) {
   const m = String(model || "").toLowerCase();
-  if (m.includes("anthropic") || m.includes("claude")) return "anthropic";
-  if (m.includes("gemini") || m.includes("google")) return "google";
-  if (m.includes("gpt") || m.includes("openai") || m.includes("o1") || m.includes("o3"))
+  if (m.includes("anthropic") || m.includes("claude")) {
+    return "anthropic";
+  }
+  if (m.includes("gemini") || m.includes("google")) {
+    return "google";
+  }
+  if (m.includes("gpt") || m.includes("openai") || m.includes("o1") || m.includes("o3")) {
     return "openai";
-  if (m.includes("grok") || m.includes("x-ai")) return "xai";
-  if (m.includes("minimax")) return "minimax";
-  if (m.includes("deepseek")) return "deepseek";
-  if (m.includes("qwen")) return "qwen";
-  if (m.includes("llama")) return "meta";
+  }
+  if (m.includes("grok") || m.includes("x-ai")) {
+    return "xai";
+  }
+  if (m.includes("minimax")) {
+    return "minimax";
+  }
+  if (m.includes("deepseek")) {
+    return "deepseek";
+  }
+  if (m.includes("qwen")) {
+    return "qwen";
+  }
+  if (m.includes("llama")) {
+    return "meta";
+  }
   return m || "(unknown)";
 }
 
@@ -64,7 +79,9 @@ function providerFamily(model) {
 // from the fresh-billed input + the cached read (which together equal the full
 // prompt the provider saw).
 function promptTokensOf(r) {
-  if (typeof r.promptTokens === "number" && r.promptTokens > 0) return r.promptTokens;
+  if (typeof r.promptTokens === "number" && r.promptTokens > 0) {
+    return r.promptTokens;
+  }
   return (r.lastCallInput || 0) + (r.cacheRead || 0);
 }
 
@@ -78,16 +95,22 @@ const rows = [];
 for (const fp of files) {
   for (const line of fs.readFileSync(fp, "utf8").split("\n")) {
     const s = line.trim();
-    if (!s) continue;
+    if (!s) {
+      continue;
+    }
     let d;
     try {
       d = JSON.parse(s);
     } catch {
       continue;
     }
-    if (!("cacheRead" in d)) continue; // only session-usage rows carry cache fields
+    if (!("cacheRead" in d)) {
+      continue;
+    } // only session-usage rows carry cache fields
     const t = parseTs(d);
-    if (!t || t < CUTOFF || t > NOW) continue;
+    if (!t || t < CUTOFF || t > NOW) {
+      continue;
+    }
     rows.push(d);
   }
 }
@@ -100,15 +123,23 @@ const familiesByValue = new Map(); // cacheRead -> Set<family>
 const countByValue = new Map(); // cacheRead -> occurrences
 for (const r of rows) {
   const v = r.cacheRead || 0;
-  if (v <= 0) continue;
-  if (!familiesByValue.has(v)) familiesByValue.set(v, new Set());
+  if (v <= 0) {
+    continue;
+  }
+  if (!familiesByValue.has(v)) {
+    familiesByValue.set(v, new Set());
+  }
   familiesByValue.get(v).add(providerFamily(r.model));
   countByValue.set(v, (countByValue.get(v) || 0) + 1);
 }
 const contaminatedValues = [...familiesByValue.entries()]
   .filter(([, fams]) => fams.size >= 2)
-  .map(([v, fams]) => ({ value: v, families: [...fams].sort(), rows: countByValue.get(v) }))
-  .sort((a, b) => b.rows - a.rows);
+  .map(([v, fams]) => ({
+    value: v,
+    families: [...fams].toSorted((a, b) => a.localeCompare(b)),
+    rows: countByValue.get(v),
+  }))
+  .toSorted((a, b) => b.rows - a.rows);
 const contaminatedSet = new Set(contaminatedValues.map((c) => c.value));
 const isContaminated = (r) => contaminatedSet.has(r.cacheRead || 0);
 const constantDefect = contaminatedValues.length > 0;
@@ -125,7 +156,9 @@ const seen = new Set();
 const deduped = [];
 for (const r of rows) {
   const k = `${r.sessionId || r.sessionKey}|${r.ts}|${r.lastCallInput}|${r.lastCallOutput}`;
-  if (seen.has(k)) continue;
+  if (seen.has(k)) {
+    continue;
+  }
   seen.add(k);
   deduped.push(r);
 }
@@ -185,7 +218,7 @@ const report = {
   },
   perModel: Object.fromEntries(
     Object.entries(byModel)
-      .sort((a, b) => b[1].n - a[1].n)
+      .toSorted((a, b) => b[1].n - a[1].n)
       .map(([m, b]) => [
         m,
         {
@@ -193,7 +226,7 @@ const report = {
           cacheRead: b.cr,
           input: b.inp,
           pct: b.cr + b.inp ? +((b.cr / (b.cr + b.inp)) * 100).toFixed(1) : 0,
-          distinctReadValues: [...b.vals].sort((x, y) => x - y),
+          distinctReadValues: [...b.vals].toSorted((x, y) => x - y),
         },
       ]),
   ),
@@ -211,15 +244,18 @@ if (AS_JSON) {
   console.log(
     `INTEGRITY: ${r.integrity.trustworthy ? "OK (headline computed on clean rows)" : "FAILED — impossible rows remain after quarantine"}`,
   );
-  if (r.integrity.constantDefect)
-    for (const c of r.integrity.crossModelFabrication)
+  if (r.integrity.constantDefect) {
+    for (const c of r.integrity.crossModelFabrication) {
       console.log(
         `  ⚠ cross-model fabricated value ${c.value} reported by ${c.families.length} families [${c.families.join(",")}] across ${c.rows} rows — quarantined`,
       );
-  if (r.integrity.impossibleRowsAfterQuarantine)
+    }
+  }
+  if (r.integrity.impossibleRowsAfterQuarantine) {
     console.log(
       `  ⚠ ${r.integrity.impossibleRowsAfterQuarantine} impossible rows remain (cacheRead > full prompt) even after quarantine`,
     );
+  }
   console.log();
   console.log(
     `HIT-RATE (as-logged):  ${r.hitRate.asLogged.pct}%  (${r.hitRate.asLogged.cacheRead}/${r.hitRate.asLogged.input} cacheRead/input)`,
@@ -234,10 +270,11 @@ if (AS_JSON) {
     `HEADLINE: ${r.hitRate.headline === null ? "UNKNOWN (impossible rows remain)" : r.hitRate.headline + "%  (cacheRead / (cacheRead+input), clean rows)"}\n`,
   );
   console.log("PER-MODEL (de-duped):");
-  for (const [m, b] of Object.entries(r.perModel))
+  for (const [m, b] of Object.entries(r.perModel)) {
     console.log(
       `  ${m.padEnd(36)} calls=${String(b.calls).padStart(3)}  read=${String(b.cacheRead).padStart(9)}  in=${String(b.input).padStart(9)}  ${b.pct}%  vals=[${b.distinctReadValues.join(",")}]`,
     );
+  }
 }
 
 process.exit(trustworthy ? 0 : 2);
