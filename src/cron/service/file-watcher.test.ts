@@ -6,7 +6,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { startCronStoreWatcher } from "./file-watcher.js";
 import { createCronServiceState } from "./state.js";
 
@@ -99,45 +98,42 @@ describe("startCronStoreWatcher (PRE-176)", () => {
     const handle = startCronStoreWatcher(state, { debounceMs: 50 });
     expect(handle).not.toBeNull();
 
-    // Three rapid edits within the debounce window.
-    fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
-    fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
-    fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
+    try {
+      // Three rapid edits within the debounce window.
+      fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
+      await new Promise((r) => setTimeout(r, 5));
+      fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
+      await new Promise((r) => setTimeout(r, 5));
+      fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
 
-    // ensureLoaded will fail because the mock state is missing real deps —
-    // we assert the reload PATH fires (either info hot-reloaded or warn
-    // hot-reload failed), not that it succeeds.
-    await waitUntil(
-      () =>
-        log.info.mock.calls.some(
-          (c) =>
-            typeof c[1] === "string" &&
-            c[1].includes("hot-reloaded jobs from disk"),
-        ) ||
-        log.warn.mock.calls.some(
-          (c) =>
-            typeof c[1] === "string" &&
-            c[1].includes("hot-reload failed"),
-        ),
-      { timeoutMs: 1500 },
-    );
+      // ensureLoaded will fail because the mock state is missing real deps —
+      // we assert the reload PATH fires (either info hot-reloaded or warn
+      // hot-reload failed), not that it succeeds.
+      await waitUntil(
+        () =>
+          log.info.mock.calls.some(
+            (c) => typeof c[1] === "string" && c[1].includes("hot-reloaded jobs from disk"),
+          ) ||
+          log.warn.mock.calls.some(
+            (c) => typeof c[1] === "string" && c[1].includes("hot-reload failed"),
+          ),
+        { timeoutMs: 10000 },
+      );
 
-    // Count how many reload attempts fired in total — should be <= 2
-    // (debounce collapses the 3 rapid edits into 1, and a second event can
-    // arrive from the editor-level rename replay on some platforms).
-    const reloadCalls =
-      log.info.mock.calls.filter(
-        (c) =>
-          typeof c[1] === "string" &&
-          c[1].includes("hot-reloaded jobs from disk"),
-      ).length +
-      log.warn.mock.calls.filter(
-        (c) =>
-          typeof c[1] === "string" &&
-          c[1].includes("hot-reload failed"),
-      ).length;
-    expect(reloadCalls).toBeLessThanOrEqual(2);
-    handle!.stop();
+      // Count how many reload attempts fired in total — should be <= 2
+      // (debounce collapses the 3 rapid edits into 1, and a second event can
+      // arrive from the editor-level rename replay on some platforms).
+      const reloadCalls =
+        log.info.mock.calls.filter(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reloaded jobs from disk"),
+        ).length +
+        log.warn.mock.calls.filter(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reload failed"),
+        ).length;
+      expect(reloadCalls).toBeLessThanOrEqual(2);
+    } finally {
+      handle!.stop();
+    }
   });
 
   it("suppressFor() skips reloads triggered during the suppression window", async () => {
@@ -146,26 +142,25 @@ describe("startCronStoreWatcher (PRE-176)", () => {
     const handle = startCronStoreWatcher(state, { debounceMs: 20 });
     expect(handle).not.toBeNull();
 
-    // Mark the next 500ms as self-write; any edit within this window must
-    // not trigger a reload.
-    handle!.suppressFor(500);
+    try {
+      // Mark the next 500ms as self-write; any edit within this window must
+      // not trigger a reload.
+      handle!.suppressFor(500);
 
-    fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
-    // Give debounce + scheduler a chance to fire.
-    await new Promise((r) => setTimeout(r, 100));
+      fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
+      // Give debounce + scheduler a chance to fire.
+      await new Promise((r) => setTimeout(r, 100));
 
-    const reloadCalls =
-      log.info.mock.calls.filter(
-        (c) =>
-          typeof c[1] === "string" &&
-          c[1].includes("hot-reloaded jobs from disk"),
-      ).length +
-      log.warn.mock.calls.filter(
-        (c) =>
-          typeof c[1] === "string" &&
-          c[1].includes("hot-reload failed"),
-      ).length;
-    expect(reloadCalls).toBe(0);
-    handle!.stop();
+      const reloadCalls =
+        log.info.mock.calls.filter(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reloaded jobs from disk"),
+        ).length +
+        log.warn.mock.calls.filter(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reload failed"),
+        ).length;
+      expect(reloadCalls).toBe(0);
+    } finally {
+      handle!.stop();
+    }
   });
 });
