@@ -60,6 +60,22 @@ export type CronFsWatchFactory = (storePath: string, onChange: () => void) => Cr
 const defaultWatchFactory: CronFsWatchFactory = (storePath, onChange) =>
   fs.watch(storePath, { persistent: false }, () => onChange());
 
+/**
+ * Minimal timer surface the debounce relies on. Kept injectable so tests can
+ * drive the debounce deterministically without depending on real wall-clock
+ * timers, which can be frozen by leaked `vi.useFakeTimers()` state from a
+ * sibling test file sharing the same worker under a parallel test pool.
+ */
+export type CronTimerFns = {
+  setTimeout: (fn: () => void, ms: number) => unknown;
+  clearTimeout: (handle: unknown) => void;
+};
+
+const defaultTimerFns: CronTimerFns = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+};
+
 export type CronFileWatcherOptions = {
   debounceMs?: number;
   /**
@@ -67,6 +83,12 @@ export type CronFileWatcherOptions = {
    * native `fs.watch`. Production callers never pass this.
    */
   watchFactory?: CronFsWatchFactory;
+  /**
+   * Test-only seam: supply deterministic timer functions so the debounce does
+   * not depend on real timers. Defaults to the global timers. Production
+   * callers never pass this.
+   */
+  timerFns?: CronTimerFns;
 };
 
 /**
@@ -93,7 +115,8 @@ export function startCronStoreWatcher(
     return null;
   }
 
-  let debounceTimer: NodeJS.Timeout | null = null;
+  const timerFns = options.timerFns ?? defaultTimerFns;
+  let debounceTimer: unknown = null;
   let suppressUntilMs = 0;
   let closed = false;
 
@@ -134,9 +157,9 @@ export function startCronStoreWatcher(
         return;
       }
       if (debounceTimer !== null) {
-        clearTimeout(debounceTimer);
+        timerFns.clearTimeout(debounceTimer);
       }
-      debounceTimer = setTimeout(triggerReload, debounceMs);
+      debounceTimer = timerFns.setTimeout(triggerReload, debounceMs);
     });
     // Don't keep the Node process alive just for the cron watcher.
     if (typeof watcher.unref === "function") {
@@ -168,7 +191,7 @@ export function startCronStoreWatcher(
       }
       closed = true;
       if (debounceTimer !== null) {
-        clearTimeout(debounceTimer);
+        timerFns.clearTimeout(debounceTimer);
         debounceTimer = null;
       }
       try {

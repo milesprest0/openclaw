@@ -7,8 +7,40 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startCronStoreWatcher } from "./file-watcher.js";
-import type { CronFsWatchFactory } from "./file-watcher.js";
+import type { CronFsWatchFactory, CronTimerFns } from "./file-watcher.js";
 import { createCronServiceState } from "./state.js";
+
+/**
+ * Deterministic timer stub: captures the pending debounce callback so the test
+ * can flush it on demand. This removes ALL dependency on real wall-clock timers
+ * (`setTimeout`), which can be frozen inside a worker by leaked
+ * `vi.useFakeTimers()` state from a sibling test file under a parallel pool.
+ */
+function createControllableTimers(): {
+  timerFns: CronTimerFns;
+  flush: () => void;
+  pending: () => boolean;
+} {
+  let cb: (() => void) | null = null;
+  const timerFns: CronTimerFns = {
+    setTimeout: (fn) => {
+      cb = fn;
+      return 1;
+    },
+    clearTimeout: () => {
+      cb = null;
+    },
+  };
+  return {
+    timerFns,
+    flush: () => {
+      const fn = cb;
+      cb = null;
+      fn?.();
+    },
+    pending: () => cb !== null,
+  };
+}
 
 /**
  * Deterministic watch factory: captures the change callback so the test can
@@ -70,18 +102,9 @@ function createStateForPath(storePath: string) {
   return { state, log };
 }
 
-async function waitUntil(
-  predicate: () => boolean,
-  opts: { timeoutMs?: number; pollMs?: number } = {},
-) {
-  const timeoutMs = opts.timeoutMs ?? 2000;
-  const pollMs = opts.pollMs ?? 20;
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`waitUntil timed out after ${timeoutMs}ms`);
-    }
-    await new Promise((r) => setTimeout(r, pollMs));
+async function flushMicrotasks(iterations = 20) {
+  for (let i = 0; i < iterations; i += 1) {
+    await Promise.resolve();
   }
 }
 
@@ -133,9 +156,11 @@ describe("startCronStoreWatcher (PRE-176)", () => {
     fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
     const { state, log } = createStateForPath(storePath);
     const watch = createControllableWatch();
+    const timers = createControllableTimers();
     const handle = startCronStoreWatcher(state, {
       debounceMs: 50,
       watchFactory: watch.factory,
+      timerFns: timers.timerFns,
     });
     expect(handle).not.toBeNull();
 
@@ -147,19 +172,24 @@ describe("startCronStoreWatcher (PRE-176)", () => {
       watch.fire();
       watch.fire();
 
+      // Debounce collapses the 3 rapid events into a single pending timer;
+      // flush it once to trigger exactly one reload attempt.
+      expect(timers.pending()).toBe(true);
+      timers.flush();
+      await state.op;
+      await flushMicrotasks();
+
       // ensureLoaded will fail because the mock state is missing real deps —
       // we assert the reload PATH fires (either info hot-reloaded or warn
       // hot-reload failed), not that it succeeds.
-      await waitUntil(
-        () =>
-          log.info.mock.calls.some(
-            (c) => typeof c[1] === "string" && c[1].includes("hot-reloaded jobs from disk"),
-          ) ||
+      expect(
+        log.info.mock.calls.some(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reloaded jobs from disk"),
+        ) ||
           log.warn.mock.calls.some(
             (c) => typeof c[1] === "string" && c[1].includes("hot-reload failed"),
           ),
-        { timeoutMs: 5000 },
-      );
+      ).toBe(true);
 
       // Count how many reload attempts fired in total — should be <= 2
       // (debounce collapses the 3 rapid events into 1; a second event can
@@ -181,9 +211,11 @@ describe("startCronStoreWatcher (PRE-176)", () => {
     fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
     const { state, log } = createStateForPath(storePath);
     const watch = createControllableWatch();
+    const timers = createControllableTimers();
     const handle = startCronStoreWatcher(state, {
       debounceMs: 20,
       watchFactory: watch.factory,
+      timerFns: timers.timerFns,
     });
     expect(handle).not.toBeNull();
 
@@ -193,8 +225,12 @@ describe("startCronStoreWatcher (PRE-176)", () => {
       handle!.suppressFor(500);
 
       watch.fire();
-      // Give debounce + scheduler a chance to fire.
-      await new Promise((r) => setTimeout(r, 100));
+      // Flush the debounce deterministically — the suppression window must
+      // cause triggerReload to bail before any reload op fires. Then let any
+      // microtasks settle.
+      timers.flush();
+      await Promise.resolve();
+      await Promise.resolve();
 
       const reloadCalls =
         log.info.mock.calls.filter(
