@@ -136,7 +136,7 @@ const contaminatedValues = [...familiesByValue.entries()]
   .filter(([, fams]) => fams.size >= 2)
   .map(([v, fams]) => ({
     value: v,
-    families: [...fams].toSorted((a, b) => a.localeCompare(b)),
+    families: [...fams].toSorted((a, b) => String(a).localeCompare(String(b))),
     rows: countByValue.get(v),
   }))
   .toSorted((a, b) => b.rows - a.rows);

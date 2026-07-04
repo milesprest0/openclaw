@@ -591,15 +591,15 @@ export async function resolveReplyDirectives(params: {
 
   const rawResolvedThinkLevelWithDefault = sourcedThinkLevel ?? "off";
 
-  const resolvedThinkLevelWithDefault =
-    sourcedThinkLevel !== undefined
-      ? rawResolvedThinkLevelWithDefault
-      : adaptiveThinkingLevelOverride(commandText, rawResolvedThinkLevelWithDefault);
-
   const thinkingExplicitlySet =
     directives.thinkLevel !== undefined ||
     targetSessionEntry?.thinkingLevel !== undefined ||
     agentCfg?.thinkingDefault !== undefined;
+
+  const resolvedThinkLevelWithDefault =
+    sourcedThinkLevel !== undefined
+      ? rawResolvedThinkLevelWithDefault
+      : adaptiveThinkingLevelOverride(commandText, rawResolvedThinkLevelWithDefault);
 
   // When neither directive nor session nor agent set reasoning, default to model capability
   // (e.g. OpenRouter with reasoning: true). Skip model default when thinking is active

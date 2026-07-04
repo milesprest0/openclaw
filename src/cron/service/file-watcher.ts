@@ -43,8 +43,52 @@ export type CronFileWatcherHandle = {
   suppressFor: (ms?: number) => void;
 };
 
+/**
+ * Minimal surface of the fs watcher the cron store relies on. Kept narrow so
+ * tests can inject a deterministic fake instead of depending on native
+ * `fs.watch` event delivery (which is environment-flaky under heavily loaded
+ * CI shards and does not reliably deliver events on all container filesystems).
+ */
+export type CronFsWatchLike = {
+  close: () => void;
+  unref?: () => void;
+  on?: (event: "error", listener: (err: unknown) => void) => void;
+};
+
+export type CronFsWatchFactory = (storePath: string, onChange: () => void) => CronFsWatchLike;
+
+const defaultWatchFactory: CronFsWatchFactory = (storePath, onChange) =>
+  fs.watch(storePath, { persistent: false }, () => onChange());
+
+/**
+ * Minimal timer surface the debounce relies on. Kept injectable so tests can
+ * drive the debounce deterministically without depending on real wall-clock
+ * timers, which can be frozen by leaked `vi.useFakeTimers()` state from a
+ * sibling test file sharing the same worker under a parallel test pool.
+ */
+export type CronTimerFns = {
+  setTimeout: (fn: () => void, ms: number) => unknown;
+  clearTimeout: (handle: unknown) => void;
+};
+
+const defaultTimerFns: CronTimerFns = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+};
+
 export type CronFileWatcherOptions = {
   debounceMs?: number;
+  /**
+   * Test-only seam: supply a deterministic watch factory. Defaults to the
+   * native `fs.watch`. Production callers never pass this.
+   */
+  watchFactory?: CronFsWatchFactory;
+  /**
+   * Test-only seam: supply deterministic timer functions so the debounce does
+   * not depend on real timers. Defaults to the global timers. Production
+   * callers never pass this.
+   */
+  timerFns?: CronTimerFns;
 };
 
 /**
@@ -71,7 +115,8 @@ export function startCronStoreWatcher(
     return null;
   }
 
-  let debounceTimer: NodeJS.Timeout | null = null;
+  const timerFns = options.timerFns ?? defaultTimerFns;
+  let debounceTimer: unknown = null;
   let suppressUntilMs = 0;
   let closed = false;
 
@@ -104,16 +149,17 @@ export function startCronStoreWatcher(
     state.op = reloadPromise;
   };
 
-  let watcher: fs.FSWatcher | null = null;
+  const watchFactory = options.watchFactory ?? defaultWatchFactory;
+  let watcher: CronFsWatchLike | null = null;
   try {
-    watcher = fs.watch(storePath, { persistent: false }, () => {
+    watcher = watchFactory(storePath, () => {
       if (closed) {
         return;
       }
       if (debounceTimer !== null) {
-        clearTimeout(debounceTimer);
+        timerFns.clearTimeout(debounceTimer);
       }
-      debounceTimer = setTimeout(triggerReload, debounceMs);
+      debounceTimer = timerFns.setTimeout(triggerReload, debounceMs);
     });
     // Don't keep the Node process alive just for the cron watcher.
     if (typeof watcher.unref === "function") {
@@ -130,9 +176,11 @@ export function startCronStoreWatcher(
   // the renamed-over file would still surface through fs.watch on the path
   // on most platforms. For maximum robustness we also swallow any error
   // bubbled by the watcher itself.
-  watcher.on("error", (err) => {
-    log.warn({ storePath, err: String(err) }, "cron: fs.watch emitted error (continuing)");
-  });
+  if (typeof watcher.on === "function") {
+    watcher.on("error", (err) => {
+      log.warn({ storePath, err: String(err) }, "cron: fs.watch emitted error (continuing)");
+    });
+  }
 
   log.info({ storePath, debounceMs }, "cron: file watcher started (hot-reload on external edits)");
 
@@ -143,7 +191,7 @@ export function startCronStoreWatcher(
       }
       closed = true;
       if (debounceTimer !== null) {
-        clearTimeout(debounceTimer);
+        timerFns.clearTimeout(debounceTimer);
         debounceTimer = null;
       }
       try {

@@ -6,9 +6,70 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { startCronStoreWatcher } from "./file-watcher.js";
+import type { CronFsWatchFactory, CronTimerFns } from "./file-watcher.js";
 import { createCronServiceState } from "./state.js";
+
+/**
+ * Deterministic timer stub: captures the pending debounce callback so the test
+ * can flush it on demand. This removes ALL dependency on real wall-clock timers
+ * (`setTimeout`), which can be frozen inside a worker by leaked
+ * `vi.useFakeTimers()` state from a sibling test file under a parallel pool.
+ */
+function createControllableTimers(): {
+  timerFns: CronTimerFns;
+  flush: () => void;
+  pending: () => boolean;
+} {
+  let cb: (() => void) | null = null;
+  const timerFns: CronTimerFns = {
+    setTimeout: (fn) => {
+      cb = fn;
+      return 1;
+    },
+    clearTimeout: () => {
+      cb = null;
+    },
+  };
+  return {
+    timerFns,
+    flush: () => {
+      const fn = cb;
+      cb = null;
+      fn?.();
+    },
+    pending: () => cb !== null,
+  };
+}
+
+/**
+ * Deterministic watch factory: captures the change callback so the test can
+ * fire synthetic fs events on demand, instead of depending on native
+ * `fs.watch` event delivery (which is environment-flaky under loaded CI shards).
+ */
+function createControllableWatch(): {
+  factory: CronFsWatchFactory;
+  fire: () => void;
+  closed: () => boolean;
+} {
+  let onChange: (() => void) | null = null;
+  let isClosed = false;
+  const factory: CronFsWatchFactory = (_storePath, cb) => {
+    onChange = cb;
+    return {
+      close: () => {
+        isClosed = true;
+      },
+      unref: () => {},
+      on: () => {},
+    };
+  };
+  return {
+    factory,
+    fire: () => onChange?.(),
+    closed: () => isClosed,
+  };
+}
 
 type MockLog = {
   info: ReturnType<typeof vi.fn>;
@@ -41,18 +102,9 @@ function createStateForPath(storePath: string) {
   return { state, log };
 }
 
-async function waitUntil(
-  predicate: () => boolean,
-  opts: { timeoutMs?: number; pollMs?: number } = {},
-) {
-  const timeoutMs = opts.timeoutMs ?? 2000;
-  const pollMs = opts.pollMs ?? 20;
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`waitUntil timed out after ${timeoutMs}ms`);
-    }
-    await new Promise((r) => setTimeout(r, pollMs));
+async function flushMicrotasks(iterations = 20) {
+  for (let i = 0; i < iterations; i += 1) {
+    await Promise.resolve();
   }
 }
 
@@ -61,11 +113,18 @@ describe("startCronStoreWatcher (PRE-176)", () => {
   let storePath: string;
 
   beforeEach(() => {
+    // Defensive: a sibling test file in the same shard worker may leave
+    // vi.useFakeTimers() active without restoring it. This file is the only
+    // one that awaits real setTimeout/debounce progress, so a leaked fake
+    // clock freezes it to the full test timeout. Force real timers here so
+    // these tests are hermetic regardless of shard ordering.
+    vi.useRealTimers();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cron-watcher-test-"));
     storePath = path.join(tmpDir, "jobs.json");
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch {
@@ -96,76 +155,93 @@ describe("startCronStoreWatcher (PRE-176)", () => {
   it("debounces rapid file edits into a single reload attempt", async () => {
     fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
     const { state, log } = createStateForPath(storePath);
-    const handle = startCronStoreWatcher(state, { debounceMs: 50 });
+    const watch = createControllableWatch();
+    const timers = createControllableTimers();
+    const handle = startCronStoreWatcher(state, {
+      debounceMs: 50,
+      watchFactory: watch.factory,
+      timerFns: timers.timerFns,
+    });
     expect(handle).not.toBeNull();
 
-    // Three rapid edits within the debounce window.
-    fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
-    fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
-    fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
+    try {
+      // Three rapid change events within the debounce window — driven
+      // deterministically so the test does not depend on native fs.watch
+      // event delivery (flaky under loaded CI shards).
+      watch.fire();
+      watch.fire();
+      watch.fire();
 
-    // ensureLoaded will fail because the mock state is missing real deps —
-    // we assert the reload PATH fires (either info hot-reloaded or warn
-    // hot-reload failed), not that it succeeds.
-    await waitUntil(
-      () =>
+      // Debounce collapses the 3 rapid events into a single pending timer;
+      // flush it once to trigger exactly one reload attempt.
+      expect(timers.pending()).toBe(true);
+      timers.flush();
+      await state.op;
+      await flushMicrotasks();
+
+      // ensureLoaded will fail because the mock state is missing real deps —
+      // we assert the reload PATH fires (either info hot-reloaded or warn
+      // hot-reload failed), not that it succeeds.
+      expect(
         log.info.mock.calls.some(
-          (c) =>
-            typeof c[1] === "string" &&
-            c[1].includes("hot-reloaded jobs from disk"),
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reloaded jobs from disk"),
         ) ||
-        log.warn.mock.calls.some(
-          (c) =>
-            typeof c[1] === "string" &&
-            c[1].includes("hot-reload failed"),
-        ),
-      { timeoutMs: 1500 },
-    );
+          log.warn.mock.calls.some(
+            (c) => typeof c[1] === "string" && c[1].includes("hot-reload failed"),
+          ),
+      ).toBe(true);
 
-    // Count how many reload attempts fired in total — should be <= 2
-    // (debounce collapses the 3 rapid edits into 1, and a second event can
-    // arrive from the editor-level rename replay on some platforms).
-    const reloadCalls =
-      log.info.mock.calls.filter(
-        (c) =>
-          typeof c[1] === "string" &&
-          c[1].includes("hot-reloaded jobs from disk"),
-      ).length +
-      log.warn.mock.calls.filter(
-        (c) =>
-          typeof c[1] === "string" &&
-          c[1].includes("hot-reload failed"),
-      ).length;
-    expect(reloadCalls).toBeLessThanOrEqual(2);
-    handle!.stop();
+      // Count how many reload attempts fired in total — should be <= 2
+      // (debounce collapses the 3 rapid events into 1; a second event can
+      // arrive from the editor-level rename replay on some platforms).
+      const reloadCalls =
+        log.info.mock.calls.filter(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reloaded jobs from disk"),
+        ).length +
+        log.warn.mock.calls.filter(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reload failed"),
+        ).length;
+      expect(reloadCalls).toBeLessThanOrEqual(2);
+    } finally {
+      handle!.stop();
+    }
   });
 
   it("suppressFor() skips reloads triggered during the suppression window", async () => {
     fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
     const { state, log } = createStateForPath(storePath);
-    const handle = startCronStoreWatcher(state, { debounceMs: 20 });
+    const watch = createControllableWatch();
+    const timers = createControllableTimers();
+    const handle = startCronStoreWatcher(state, {
+      debounceMs: 20,
+      watchFactory: watch.factory,
+      timerFns: timers.timerFns,
+    });
     expect(handle).not.toBeNull();
 
-    // Mark the next 500ms as self-write; any edit within this window must
-    // not trigger a reload.
-    handle!.suppressFor(500);
+    try {
+      // Mark the next 500ms as self-write; any event within this window must
+      // not trigger a reload.
+      handle!.suppressFor(500);
 
-    fs.writeFileSync(storePath, JSON.stringify({ jobs: [] }));
-    // Give debounce + scheduler a chance to fire.
-    await new Promise((r) => setTimeout(r, 100));
+      watch.fire();
+      // Flush the debounce deterministically — the suppression window must
+      // cause triggerReload to bail before any reload op fires. Then let any
+      // microtasks settle.
+      timers.flush();
+      await Promise.resolve();
+      await Promise.resolve();
 
-    const reloadCalls =
-      log.info.mock.calls.filter(
-        (c) =>
-          typeof c[1] === "string" &&
-          c[1].includes("hot-reloaded jobs from disk"),
-      ).length +
-      log.warn.mock.calls.filter(
-        (c) =>
-          typeof c[1] === "string" &&
-          c[1].includes("hot-reload failed"),
-      ).length;
-    expect(reloadCalls).toBe(0);
-    handle!.stop();
+      const reloadCalls =
+        log.info.mock.calls.filter(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reloaded jobs from disk"),
+        ).length +
+        log.warn.mock.calls.filter(
+          (c) => typeof c[1] === "string" && c[1].includes("hot-reload failed"),
+        ).length;
+      expect(reloadCalls).toBe(0);
+    } finally {
+      handle!.stop();
+    }
   });
 });

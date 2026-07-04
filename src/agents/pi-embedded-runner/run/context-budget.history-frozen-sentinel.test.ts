@@ -7,7 +7,7 @@ import {
 } from "./context-budget.js";
 
 function makeUser(text: string): AgentMessage {
-  return { role: "user", content: text, timestamp: 0 } as AgentMessage;
+  return { role: "user", content: text, timestamp: 0 } as unknown as AgentMessage;
 }
 
 function makeAssistant(text: string): AgentMessage {
@@ -85,7 +85,7 @@ function makeFrozenBoundaryMessages(): AgentMessage[] {
         { type: "text", text: "last frozen text" },
       ],
       timestamp: 0,
-    } as AgentMessage,
+    } as unknown as AgentMessage,
     makeUser("warm"),
     makeAssistant("live"),
   ];
