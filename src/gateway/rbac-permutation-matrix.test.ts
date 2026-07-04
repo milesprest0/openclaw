@@ -47,7 +47,7 @@ const ALL_SCOPES: OperatorScope[] = [
 function allRegisteredMethods(): string[] {
   const listed = listGatewayMethods();
   const handlers = Object.keys(coreGatewayHandlers);
-  return Array.from(new Set([...listed, ...handlers])).sort();
+  return Array.from(new Set([...listed, ...handlers])).toSorted();
 }
 
 /**
