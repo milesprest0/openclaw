@@ -118,9 +118,10 @@ export function buildThreadingToolContext(params: {
     ...(topicId ? { topicId } : {}),
     ...(replyToId ? { replyToId } : {}),
     ...(threadTs ? { threadTs } : {}),
-    isInboundThreadedTurn:
-      Boolean(normalizeOptionalString(sessionCtx.ThreadLabel)) &&
-      Boolean(topicId || replyToId || threadTs),
+    // Some providers/surfaces do not populate ThreadLabel consistently even when
+    // the inbound message is clearly threaded (topic/reply/thread ids present).
+    // Treat any inbound thread identifier as a threaded turn.
+    isInboundThreadedTurn: Boolean(topicId || replyToId || threadTs),
   };
   const originProvider = resolveOriginMessageProvider({
     originatingChannel: sessionCtx.OriginatingChannel,
