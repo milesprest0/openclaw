@@ -282,4 +282,25 @@ describe("agent-runner-utils", () => {
       isInboundThreadedTurn: true,
     });
   });
+
+  it("marks inbound turn as threaded when thread ids exist even without ThreadLabel", () => {
+    const context = buildThreadingToolContext({
+      sessionCtx: {
+        Provider: "slack",
+        OriginatingChannel: "slack",
+        OriginatingTo: "channel:C123",
+        MessageThreadId: 77,
+        ReplyToId: "171.002",
+      },
+      config: {},
+      hasRepliedRef: undefined,
+    });
+
+    expect(context.turnThreadContext).toEqual({
+      topicId: "77",
+      replyToId: "171.002",
+      threadTs: "171.002",
+      isInboundThreadedTurn: true,
+    });
+  });
 });
