@@ -289,7 +289,120 @@ export async function recoverOrphanedSubagentSessions(params: {
 
         const entry = store[childSessionKey];
         if (!entry) {
-          result.skipped++;
+          // PATCH-021 (2026-07-02 incident): the session-store entry was lost
+          // to a mid-turn shutdown, but the run record still carries the task
+          // brief. Restart IN-FLIGHT work in a fresh session under the same
+          // key instead of silently skipping — the prior behavior stranded the
+          // requester with no notification and no retry. Failures flow into
+          // failedRuns so the existing finalizeInterruptedSubagentRun path
+          // announces them once the retry budget is exhausted. Ended runs
+          // (tombstones) are still skipped.
+          if (typeof runRecord.endedAt === "number" && runRecord.endedAt > 0) {
+            result.skipped++;
+            continue;
+          }
+          // PATCH-021B (2026-07-07 duplicate-rerun incident): task-level dedup +
+          // original-vs-rerun arbitration. The v1 restart path raced the periodic
+          // sweeper and re-registered siblings, so a "<key>-rerun" twin could spawn
+          // while the original run was still registered and alive — two subagents
+          // then ran the same brief concurrently. Rules (spec Part B2):
+          //   R1 never restart while a LIVE sibling of the same task key exists
+          //      (same key, its base, or its "-rerun" twin; un-ended AND session
+          //      entry present or activity within the 10-min freshness window);
+          //   R2 a "-rerun" row always defers to its registered base row;
+          //   R3 same-key twins arbitrate deterministically (lowest runId wins);
+          //   R4 deferred rows are stamped supersededAt so the sweeper prunes them
+          //      instead of resurrecting them; the restarting row is stamped
+          //      restartInitiatedAt so the sweeper treats it as claimed.
+          const __p21bBaseOf = (s: string): string =>
+            s.endsWith("-rerun") ? s.slice(0, -"-rerun".length) : s;
+          const __p21bKey = String(childSessionKey);
+          const __p21bBase = __p21bBaseOf(__p21bKey);
+          const __p21bNow = Date.now();
+          const __p21bRows: Array<[string, any]> = (() => {
+            try {
+              const r = (params as any).getActiveRuns?.();
+              if (!r) return [];
+              return r instanceof Map ? Array.from(r.entries()) : Object.entries(r);
+            } catch {
+              return [];
+            }
+          })();
+          const __p21bSiblings = __p21bRows.filter(([otherId, rec]) => {
+            if (String(otherId) === String(runId) || !rec) return false;
+            if (typeof (rec as any).endedAt === "number" && (rec as any).endedAt > 0) {
+              return false;
+            }
+            return __p21bBaseOf(String((rec as any).childSessionKey ?? "")) === __p21bBase;
+          });
+          const __p21bIsLive = ([, rec]: [string, any]): boolean => {
+            const k = String((rec as any).childSessionKey ?? "");
+            if (k && (store as any)[k]) return true;
+            const ts = Math.max(
+              Number((rec as any).lastCheckpointAt ?? 0),
+              Number((rec as any).lastActivityAt ?? 0),
+              Number((rec as any).heartbeatAt ?? 0),
+              Number((rec as any).updatedAt ?? 0),
+            );
+            return ts > 0 && __p21bNow - ts < 600_000;
+          };
+          const __p21bDefer =
+            resumedSessionKeys.has(__p21bBase) ||
+            resumedSessionKeys.has(`${__p21bBase}-rerun`) ||
+            __p21bSiblings.some(__p21bIsLive) ||
+            (__p21bKey !== __p21bBase &&
+              __p21bSiblings.some(
+                ([, rec]) => String((rec as any).childSessionKey ?? "") === __p21bBase,
+              )) ||
+            __p21bSiblings.some(
+              ([otherId, rec]) =>
+                String((rec as any).childSessionKey ?? "") === __p21bKey &&
+                String(otherId) < String(runId),
+            );
+          if (__p21bDefer) {
+            try {
+              (runRecord as any).supersededAt = __p21bNow;
+            } catch {
+              /* best-effort stamp */
+            }
+            log.warn(
+              `orphaned run ${runId} (${childSessionKey}) NOT restarted: live/base sibling registered for the same task key (PATCH021B dedup)`,
+            );
+            result.skipped++;
+            continue;
+          }
+          for (const [, __p21bRec] of __p21bSiblings) {
+            try {
+              (__p21bRec as any).supersededAt = __p21bNow;
+            } catch {
+              /* best-effort stamp */
+            }
+          }
+          try {
+            (runRecord as any).restartInitiatedAt = __p21bNow;
+          } catch {
+            /* sweeper claim stamp is best-effort */
+          }
+          log.warn(
+            `orphaned run ${runId} has no session-store entry for ${childSessionKey}; restarting from task brief (PATCH021)`,
+          );
+          const restartResult = await resumeOrphanedSession({
+            sessionKey: childSessionKey,
+            task: runRecord.task,
+            originalRunId: runId,
+            originalRun: runRecord,
+          });
+          if (restartResult.resumed) {
+            resumedSessionKeys.add(childSessionKey);
+            result.recovered++;
+          } else {
+            result.failed++;
+            result.failedRuns.push({
+              runId,
+              childSessionKey,
+              error: restartResult.error ?? "missing-session-entry restart failed",
+            });
+          }
           continue;
         }
 

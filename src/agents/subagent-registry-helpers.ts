@@ -327,6 +327,21 @@ export function reconcileOrphanedRestoredRuns(params: {
     if (!orphanReason) {
       continue;
     }
+    // PATCH-021 (2026-07-02 incident): an IN-FLIGHT run (no endedAt) whose
+    // session-STORE entry was lost to a mid-turn shutdown is NOT unrecoverable
+    // garbage — the orphan-recovery pass can restart it from its recorded task
+    // brief. Pruning here deleted 40+ minutes of live work with only a journal
+    // warn and no requester notification. ENDED runs with missing entries are
+    // tombstones and still prune, as do stale unended runs.
+    if (
+      (orphanReason === "missing-session-entry" || orphanReason === "missing-session-id") &&
+      typeof entry.endedAt !== "number"
+    ) {
+      defaultRuntime.log(
+        `[info] PATCH021 keeping in-flight orphaned run for recovery source=restore run=${runId} child=${entry.childSessionKey} reason=${orphanReason}`,
+      );
+      continue;
+    }
     if (
       reconcileOrphanedRun({
         runId,
