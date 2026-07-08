@@ -5335,6 +5335,33 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
     );
   });
 
+  it("keeps mention-triggered group/channel turns visible even without group visibleReplies config", async () => {
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(async (_ctx: MsgContext, opts?: GetReplyOptions) => {
+      expect(opts?.sourceReplyDeliveryMode).toBe("automatic");
+      expect(opts?.suppressTyping).toBe(false);
+      return { text: "mention reply" } satisfies ReplyPayload;
+    });
+
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        ChatType: "channel",
+        WasMentioned: true,
+        SessionKey: "test:slack:channel:C1",
+      }),
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver,
+    });
+
+    expect(replyResolver).toHaveBeenCalledTimes(1);
+    expect(result.queuedFinal).toBe(true);
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "mention reply" }),
+    );
+  });
+
   it("allows config to keep group/channel source delivery automatic", async () => {
     setNoAbort();
     const dispatcher = createDispatcher();

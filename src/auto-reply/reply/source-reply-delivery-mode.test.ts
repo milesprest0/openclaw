@@ -32,6 +32,27 @@ describe("resolveSourceReplyDeliveryMode", () => {
     );
   });
 
+  it("forces automatic delivery for mentions in groups/channels", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "channel", WasMentioned: true },
+      }),
+    ).toBe("automatic");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "group", WasMentioned: true },
+      }),
+    ).toBe("automatic");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "direct", WasMentioned: true },
+      }),
+    ).toBe("automatic");
+  });
+
   it("honors config and explicit requested mode", () => {
     expect(
       resolveSourceReplyDeliveryMode({
@@ -196,6 +217,35 @@ describe("resolveSourceReplyVisibilityPolicy", () => {
       suppressHookReplyLifecycle: false,
       suppressTyping: false,
       deliverySuppressionReason: "sourceReplyDeliveryMode: message_tool_only",
+    });
+  });
+
+  it("keeps mention-triggered group/channel replies visible", () => {
+    expect(
+      resolveSourceReplyVisibilityPolicy({
+        cfg: emptyConfig,
+        ctx: { ChatType: "channel", WasMentioned: true },
+        sendPolicy: "allow",
+      }),
+    ).toMatchObject({
+      sourceReplyDeliveryMode: "automatic",
+      suppressAutomaticSourceDelivery: false,
+      suppressDelivery: false,
+      suppressHookUserDelivery: false,
+      deliverySuppressionReason: "",
+    });
+    expect(
+      resolveSourceReplyVisibilityPolicy({
+        cfg: emptyConfig,
+        ctx: { ChatType: "group", WasMentioned: true },
+        sendPolicy: "allow",
+      }),
+    ).toMatchObject({
+      sourceReplyDeliveryMode: "automatic",
+      suppressAutomaticSourceDelivery: false,
+      suppressDelivery: false,
+      suppressHookUserDelivery: false,
+      deliverySuppressionReason: "",
     });
   });
 
