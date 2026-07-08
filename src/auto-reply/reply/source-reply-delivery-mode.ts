@@ -8,6 +8,7 @@ export type SourceReplyDeliveryModeContext = {
   CommandAuthorized?: boolean;
   CommandBody?: string;
   CommandSource?: "text" | "native";
+  WasMentioned?: boolean;
 };
 
 export function isExplicitSourceReplyCommand(ctx: SourceReplyDeliveryModeContext): boolean {
@@ -33,6 +34,9 @@ export function resolveSourceReplyDeliveryMode(params: {
     return "automatic";
   }
   const chatType = normalizeChatType(params.ctx.ChatType);
+  if ((chatType === "group" || chatType === "channel") && params.ctx.WasMentioned === true) {
+    return "automatic";
+  }
   let mode: SourceReplyDeliveryMode;
   if (chatType === "group" || chatType === "channel") {
     const configuredMode =
