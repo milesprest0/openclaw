@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  assessRunLiveness,
+  DEFAULT_FRESHNESS_MS,
   isLiveUnendedSubagentRun,
   RECENT_ENDED_SUBAGENT_CHILD_SESSION_MS,
   isStaleUnendedSubagentRun,
@@ -16,6 +18,109 @@ describe("subagent run liveness", () => {
     };
     expect(isLiveUnendedSubagentRun(entry, now)).toBe(true);
     expect(isStaleUnendedSubagentRun(entry, now)).toBe(false);
+  });
+
+  it("assessRunLiveness marks missing run as dead and stops monitoring", () => {
+    expect(assessRunLiveness(undefined, now)).toEqual({
+      state: "dead",
+      announceStillRunning: false,
+      stopMonitoring: true,
+    });
+  });
+
+  it("assessRunLiveness marks ended runs as dead and stops monitoring", () => {
+    expect(
+      assessRunLiveness(
+        {
+          createdAt: now - 30_000,
+          endedAt: now - 1,
+        },
+        now,
+      ),
+    ).toEqual({
+      state: "dead",
+      announceStillRunning: false,
+      stopMonitoring: true,
+    });
+  });
+
+  it("assessRunLiveness marks fresh unended runs live", () => {
+    expect(
+      assessRunLiveness(
+        {
+          createdAt: now - 2 * 60_000,
+          startedAt: now - 60_000,
+        },
+        now,
+      ),
+    ).toEqual({
+      state: "live",
+      announceStillRunning: true,
+      stopMonitoring: false,
+    });
+  });
+
+  it("assessRunLiveness marks stale unended runs dead beyond freshness", () => {
+    expect(
+      assessRunLiveness(
+        {
+          createdAt: now - DEFAULT_FRESHNESS_MS - 60_000,
+          startedAt: now - DEFAULT_FRESHNESS_MS - 1,
+        },
+        now,
+      ),
+    ).toEqual({
+      state: "dead",
+      announceStillRunning: false,
+      stopMonitoring: true,
+    });
+  });
+
+  it("assessRunLiveness fails open as unknown for garbage timestamps", () => {
+    expect(
+      assessRunLiveness(
+        {
+          createdAt: Number.NaN,
+          startedAt: Number.NaN,
+          sessionStartedAt: Number.NaN,
+        },
+        now,
+      ),
+    ).toEqual({
+      state: "unknown",
+      announceStillRunning: true,
+      stopMonitoring: false,
+    });
+  });
+
+  it("respects PREST0N_RUN_LIVENESS_FRESHNESS_MS overrides", async () => {
+    const previous = process.env.PREST0N_RUN_LIVENESS_FRESHNESS_MS;
+    vi.resetModules();
+    process.env.PREST0N_RUN_LIVENESS_FRESHNESS_MS = "1500";
+    try {
+      const mod = await import("./subagent-run-liveness.js");
+      expect(mod.DEFAULT_FRESHNESS_MS).toBe(1500);
+      expect(
+        mod.assessRunLiveness(
+          {
+            createdAt: now - 2_000,
+            startedAt: now - 1_600,
+          },
+          now,
+        ),
+      ).toEqual({
+        state: "dead",
+        announceStillRunning: false,
+        stopMonitoring: true,
+      });
+    } finally {
+      if (previous == null) {
+        delete process.env.PREST0N_RUN_LIVENESS_FRESHNESS_MS;
+      } else {
+        process.env.PREST0N_RUN_LIVENESS_FRESHNESS_MS = previous;
+      }
+      vi.resetModules();
+    }
   });
 
   it("marks old unended runs stale when no explicit timeout extends the window", () => {
