@@ -10,6 +10,21 @@ import { normalizeSlackThreadTsCandidate } from "./thread-ts.js";
 
 const SLACK_SUBAGENT_PROGRESS_TICK_INTERVAL_MS = 5 * 60_000;
 const SLACK_SUBAGENT_PROGRESS_TICKER_MAX_AGE_MS = 60 * 60_000;
+const SUBAGENT_RUN_LIVENESS_GATE_SYMBOL = Symbol.for("prest0n.subagentRunLiveness");
+
+type SubagentRunLivenessAssessment = {
+  announceStillRunning: boolean;
+  stopMonitoring: boolean;
+};
+
+type SubagentRunLivenessGate = (
+  params: {
+    runId?: string;
+    childSessionKey?: string;
+    spawnedAt?: number;
+  },
+  nowMs: number,
+) => SubagentRunLivenessAssessment;
 
 type SlackSubagentOrigin = {
   channel: "slack";
@@ -233,11 +248,37 @@ function maybeStartSlackSubagentTicker(params: {
   }
   clearSlackSubagentTicker(params.state);
   const ticker = setInterval(() => {
-    if (Date.now() - params.state.spawnedAt > SLACK_SUBAGENT_PROGRESS_TICKER_MAX_AGE_MS) {
+    const nowMs = Date.now();
+    if (nowMs - params.state.spawnedAt > SLACK_SUBAGENT_PROGRESS_TICKER_MAX_AGE_MS) {
       removeSlackSubagentStateBySessionKey(params.state.childSessionKey);
       return;
     }
-    const elapsedMinutes = Math.max(1, Math.floor((Date.now() - params.state.spawnedAt) / 60_000));
+    const gateCandidate = (globalThis as Record<PropertyKey, unknown>)[
+      SUBAGENT_RUN_LIVENESS_GATE_SYMBOL
+    ];
+    if (typeof gateCandidate === "function") {
+      const gate = gateCandidate as SubagentRunLivenessGate;
+      try {
+        const assessment = gate(
+          {
+            runId: params.state.runId,
+            childSessionKey: params.state.childSessionKey,
+            spawnedAt: params.state.spawnedAt,
+          },
+          nowMs,
+        );
+        if (assessment.stopMonitoring) {
+          removeSlackSubagentStateBySessionKey(params.state.childSessionKey);
+          return;
+        }
+        if (!assessment.announceStillRunning) {
+          return;
+        }
+      } catch {
+        // Fall back to legacy ticker behavior when gate consult fails.
+      }
+    }
+    const elapsedMinutes = Math.max(1, Math.floor((nowMs - params.state.spawnedAt) / 60_000));
     void sendSlackSubagentThreadMessage({
       api: params.api,
       state: params.state,

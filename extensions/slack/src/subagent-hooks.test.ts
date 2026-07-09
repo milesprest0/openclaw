@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerSlackSubagentHooks } from "../subagent-hooks-api.js";
 import { __testing as subagentHookTesting } from "./subagent-hooks.js";
 
+const SUBAGENT_RUN_LIVENESS_GATE_SYMBOL = Symbol.for("prest0n.subagentRunLiveness");
+
 const hookMocks = vi.hoisted(() => ({
   sendMessageSlack: vi.fn(async () => ({ messageId: "m1", channelId: "C123", receipt: {} })),
 }));
@@ -24,11 +26,13 @@ function registerHandlersForTest(config: Record<string, unknown> = { channels: {
 
 describe("slack subagent hook handlers", () => {
   beforeEach(() => {
+    delete (globalThis as Record<PropertyKey, unknown>)[SUBAGENT_RUN_LIVENESS_GATE_SYMBOL];
     subagentHookTesting.resetSlackSubagentHooksState();
     hookMocks.sendMessageSlack.mockClear();
   });
 
   afterEach(() => {
+    delete (globalThis as Record<PropertyKey, unknown>)[SUBAGENT_RUN_LIVENESS_GATE_SYMBOL];
     vi.useRealTimers();
     subagentHookTesting.resetSlackSubagentHooksState();
   });
@@ -195,6 +199,63 @@ describe("slack subagent hook handlers", () => {
 
     await vi.advanceTimersByTimeAsync(20 * 60_000);
     expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(13);
+  });
+
+  it("stops ticker announcements when liveness gate marks the run dead", async () => {
+    vi.useFakeTimers();
+    const handlers = registerHandlersForTest();
+    const spawnedHandler = getRequiredHookHandler(handlers, "subagent_spawned");
+
+    const gate = vi.fn(
+      (params: {
+        spawnedAt?: number;
+      }): { state: string; announceStillRunning: boolean; stopMonitoring: boolean } => {
+        const spawnedAt = typeof params.spawnedAt === "number" ? params.spawnedAt : Date.now();
+        if (Date.now() - spawnedAt >= 10 * 60_000) {
+          return {
+            state: "dead",
+            announceStillRunning: false,
+            stopMonitoring: true,
+          };
+        }
+        return {
+          state: "live",
+          announceStillRunning: true,
+          stopMonitoring: false,
+        };
+      },
+    );
+    (globalThis as Record<PropertyKey, unknown>)[SUBAGENT_RUN_LIVENESS_GATE_SYMBOL] = gate;
+
+    await spawnedHandler(
+      {
+        runId: "run-gate",
+        childSessionKey: "agent:main:subagent:gate",
+        agentId: "codex",
+        label: "gate-check",
+        mode: "run",
+        threadRequested: true,
+        requester: {
+          channel: "slack",
+          accountId: "work",
+          to: "channel:C123",
+          threadId: "1710000000.100001",
+        },
+      },
+      {},
+    );
+
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(hookMocks.sendMessageSlack).toHaveBeenCalledTimes(2);
+    expect(gate).toHaveBeenCalled();
   });
 
   it("announces completion and clears progress ticker on matching subagent_ended keys", async () => {
