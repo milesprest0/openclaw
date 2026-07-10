@@ -3347,14 +3347,10 @@ export async function runEmbeddedAttempt(
                   : {}),
                 systemPrompt: systemPromptForHook,
                 prompt: promptForModel,
-                contextTokenBudget: contextBudgetGuard.targetBandEnabled
-                  ? contextBudgetGuard.maxAssembledTokens
-                  : contextTokenBudget,
+                contextTokenBudget: contextBudgetGuard.maxAssembledTokens,
                 reserveTokens,
                 toolResultMaxChars: resolveLiveToolResultMaxChars({
-                  contextWindowTokens: contextBudgetGuard.targetBandEnabled
-                    ? contextBudgetGuard.maxAssembledTokens
-                    : contextTokenBudget,
+                  contextWindowTokens: contextBudgetGuard.maxAssembledTokens,
                   cfg: params.config,
                   agentId: sessionAgentId,
                 }),

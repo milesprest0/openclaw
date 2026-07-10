@@ -151,6 +151,8 @@ async function invokeRegisteredHandler(input: {
     event: input.event,
     body: input.body ?? {},
   });
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   return { handleSlackMessage };
 }
 
@@ -160,6 +162,8 @@ async function runMessageCase(input: MessageCase = {}): Promise<void> {
     event: (input.event ?? makeChangedEvent()) as Record<string, unknown>,
     body: input.body ?? {},
   });
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("registerSlackMessageEvents", () => {

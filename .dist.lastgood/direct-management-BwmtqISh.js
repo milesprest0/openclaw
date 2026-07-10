@@ -1,0 +1,12 @@
+import {
+  i as repairMatrixDirectRooms,
+  n as persistMatrixDirectRoomMapping,
+  r as promoteMatrixDirectRoomCandidate,
+  t as inspectMatrixDirectRooms,
+} from "./direct-management-FqagZ_db.js";
+export {
+  inspectMatrixDirectRooms,
+  persistMatrixDirectRoomMapping,
+  promoteMatrixDirectRoomCandidate,
+  repairMatrixDirectRooms,
+};

@@ -115,6 +115,12 @@ function ensureSlackTestRuntime(): {
 
 export const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+async function settleAsyncWork(turns = 120) {
+  for (let i = 0; i < turns; i += 1) {
+    await flush();
+  }
+}
+
 async function waitForSlackEvent(name: string) {
   for (let i = 0; i < 10; i += 1) {
     if (getSlackHandlers()?.has(name)) {
@@ -151,9 +157,10 @@ export async function stopSlackMonitor(params: {
   controller: AbortController;
   run: Promise<unknown>;
 }) {
-  await flush();
+  await settleAsyncWork();
   params.controller.abort();
   await params.run;
+  await settleAsyncWork();
 }
 
 async function runSlackEventOnce(
@@ -165,6 +172,7 @@ async function runSlackEventOnce(
   const { controller, run } = startSlackMonitor(monitorSlackProvider, opts);
   const handler = await getSlackHandlerOrThrow(name);
   await handler(args);
+  await settleAsyncWork();
   await stopSlackMonitor({ controller, run });
 }
 

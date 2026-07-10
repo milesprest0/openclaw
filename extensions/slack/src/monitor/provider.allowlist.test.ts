@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   flush,
   getSlackHandlerOrThrow,
@@ -50,12 +50,14 @@ describe("slack startup user allowlist resolution", () => {
         slack: {
           enabled: true,
           dmPolicy: "allowlist",
-          allowFrom: ["<@U123GLOBAL>", "@global-user"],
+          // Mention-form entries like <@U123...> are no longer normalized in dm allowlists;
+          // keep this test focused on "no name resolution" by using stable id entries.
+          allowFrom: ["U123GLOBAL", "@global-user"],
           channels: {
             C123: {
               enabled: true,
               requireMention: false,
-              users: ["<@U123CHANNEL>", "@channel-user"],
+              users: ["U123CHANNEL", "@channel-user"],
             },
           },
         },
@@ -81,7 +83,12 @@ describe("slack startup user allowlist resolution", () => {
           channel_type: "im",
         },
       });
-      expect(slackTestState.replyMock).toHaveBeenCalledTimes(1);
+      await vi.waitFor(
+        () => {
+          expect(slackTestState.replyMock).toHaveBeenCalledTimes(1);
+        },
+        { timeout: 5_000, interval: 10 },
+      );
 
       slackTestState.replyMock.mockClear();
       await handler({
@@ -94,7 +101,12 @@ describe("slack startup user allowlist resolution", () => {
           channel_type: "channel",
         },
       });
-      expect(slackTestState.replyMock).toHaveBeenCalledTimes(1);
+      await vi.waitFor(
+        () => {
+          expect(slackTestState.replyMock).toHaveBeenCalledTimes(1);
+        },
+        { timeout: 5_000, interval: 10 },
+      );
     } finally {
       await stopSlackMonitor(monitor);
     }

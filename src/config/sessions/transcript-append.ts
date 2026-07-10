@@ -252,6 +252,14 @@ async function appendSessionTranscriptMessageLocked(params: {
   useRawWhenLinear?: boolean;
   config?: SessionWriteLockAcquireTimeoutConfig;
 }): Promise<{ messageId: string }> {
+  let preLockLeafInfo: TranscriptLeafInfo | undefined;
+  let preLockStat: fsSync.Stats | null = null;
+  const initialStat = await fs.stat(params.transcriptPath).catch(() => null);
+  if ((initialStat?.size ?? 0) > SESSION_MANAGER_APPEND_MAX_BYTES) {
+    preLockStat = initialStat;
+    preLockLeafInfo = await readTranscriptLeafInfo(params.transcriptPath).catch(() => undefined);
+  }
+
   const lock = await acquireSessionWriteLock({
     sessionFile: params.transcriptPath,
     timeoutMs: resolveSessionWriteLockAcquireTimeoutMs(params.config),
@@ -265,12 +273,21 @@ async function appendSessionTranscriptMessageLocked(params: {
       ...(params.cwd ? { cwd: params.cwd } : {}),
     });
     const stat = await fs.stat(params.transcriptPath).catch(() => null);
-    let leafInfo: TranscriptLeafInfo = await readTranscriptLeafInfo(params.transcriptPath).catch(
-      () => ({
+    let leafInfo: TranscriptLeafInfo;
+    if (
+      preLockLeafInfo &&
+      preLockStat &&
+      stat &&
+      stat.size === preLockStat.size &&
+      stat.mtimeMs === preLockStat.mtimeMs
+    ) {
+      leafInfo = preLockLeafInfo;
+    } else {
+      leafInfo = await readTranscriptLeafInfo(params.transcriptPath).catch(() => ({
         hasParentLinkedEntries: false,
         nonSessionEntryCount: 0,
-      }),
-    );
+      }));
+    }
     const hasLinearEntries = !leafInfo.hasParentLinkedEntries && leafInfo.nonSessionEntryCount > 0;
     const allowRawWhenLinear = params.useRawWhenLinear !== false;
     const shouldRawAppend =

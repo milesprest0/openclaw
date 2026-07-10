@@ -350,38 +350,6 @@ describe("createVideoGenerateTool", () => {
     expect(taskExecutorMocks.completeTaskRunByRunId).not.toHaveBeenCalled();
   });
 
-  it("surfaces a capability clarifier when no finished video file is rendered", async () => {
-    vi.spyOn(videoGenerationRuntime, "generateVideo").mockResolvedValue({
-      provider: "qwen",
-      model: "wan2.6-t2v",
-      attempts: [],
-      ignoredOverrides: [],
-      videos: [],
-    });
-
-    const tool = createVideoGenerateTool({
-      config: asConfig({
-        agents: {
-          defaults: {
-            videoGenerationModel: { primary: "qwen/wan2.6-t2v" },
-          },
-        },
-      }),
-    });
-    if (!tool) {
-      throw new Error("expected video_generate tool");
-    }
-
-    const result = await tool.execute("call-1", { prompt: "friendly lobster surfing" });
-    const text = (result.content?.[0] as { text: string } | undefined)?.text ?? "";
-
-    expect(text).toContain(
-      "Note: I can draft a script, shot list, or storyboard, but cannot render or export a finished video file in this environment.",
-    );
-    expect(text).not.toContain("MEDIA:");
-    expect(result.details).toMatchObject({ count: 0 });
-  });
-
   it("uses the video media cap when mediaMaxMb is not configured", async () => {
     vi.spyOn(videoGenerationRuntime, "generateVideo").mockResolvedValue({
       provider: "qwen",

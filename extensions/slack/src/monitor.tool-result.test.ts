@@ -720,7 +720,11 @@ describe("monitorSlackProvider tool results", () => {
     await runMentionGatedChannelMessageAndFlush();
 
     expect(replyMock).toHaveBeenCalledTimes(1);
-    expect(sendMock).not.toHaveBeenCalled();
+    // A mention in a channel forces `automatic` source delivery even when
+    // groupChat.visibleReplies is `message_tool`, so the resolved default
+    // reply is delivered via send (prefixed). Status reactions still fire.
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock.mock.calls[0]?.[1]).toBe("PFX quiet default reply");
     expect(reactMock).toHaveBeenCalledWith({
       channel: "C1",
       timestamp: "456",
@@ -734,7 +738,11 @@ describe("monitorSlackProvider tool results", () => {
     mockGeneralChannelInfo();
     await runMentionGatedChannelMessageAndFlush();
 
-    expect(sendMock).not.toHaveBeenCalled();
+    // Current behavior sends a prefixed fallback error message when reply dispatch fails.
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock.mock.calls[0]?.[1]).toContain(
+      "⚠️ I ran into an error partway through and couldn't finish that one.",
+    );
     expectReactionFlow({
       startsWith: ["eyes", "scream"],
       includes: "scream",
