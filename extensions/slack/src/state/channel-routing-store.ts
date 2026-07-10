@@ -115,9 +115,9 @@ class ChannelRoutingStoreImpl implements ChannelRoutingStore {
   }
 
   async upsert(input: UpsertChannelRoutingInput): Promise<ChannelRoutingRecord> {
-    assertKey(input.workspaceId, "workspaceId");
-    assertKey(input.channelId, "channelId");
-    assertKey(input.modelId, "modelId");
+    assertRoutingKey(input.workspaceId, "workspaceId");
+    assertRoutingKey(input.channelId, "channelId");
+    assertNonEmptyString(input.modelId, "modelId");
 
     const key = routingKey(input.workspaceId, input.channelId);
     const now = input.now ?? Date.now();
@@ -228,10 +228,14 @@ function routingKey(workspaceId: string, channelId: string): string {
   return `${workspaceId}/${channelId}`;
 }
 
-function assertKey(value: string, label: string): void {
+function assertNonEmptyString(value: string, label: string): void {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`channel routing: ${label} must be a non-empty string`);
   }
+}
+
+function assertRoutingKey(value: string, label: string): void {
+  assertNonEmptyString(value, label);
   if (value.includes("/")) {
     throw new TypeError(`channel routing: ${label} must not contain '/' (namespace delimiter)`);
   }

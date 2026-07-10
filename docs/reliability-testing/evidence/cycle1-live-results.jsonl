@@ -1,0 +1,5 @@
+{"key":"openai","exit_code":1,"json":"/tmp/cycle1-live-json/openai.live.json","log":"docs/reliability-testing/evidence/openai.live.vitest.log"}
+{"key":"google","exit_code":0,"json":"/tmp/cycle1-live-json/google.live.json","log":"docs/reliability-testing/evidence/google.live.vitest.log"}
+{"key":"openrouter","exit_code":0,"json":"/tmp/cycle1-live-json/openrouter.live.json","log":"docs/reliability-testing/evidence/openrouter.live.vitest.log"}
+{"key":"discord","exit_code":0,"json":"/tmp/cycle1-live-json/discord.live.json","log":"docs/reliability-testing/evidence/discord.live.vitest.log"}
+{"key":"elevenlabs","exit_code":0,"json":"/tmp/cycle1-live-json/elevenlabs.live.json","log":"docs/reliability-testing/evidence/elevenlabs.live.vitest.log"}

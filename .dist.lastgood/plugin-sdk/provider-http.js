@@ -1,0 +1,67 @@
+import { r as fetchWithTimeout } from "../fetch-timeout-Df3EC-Xg.js";
+import {
+  i as resolveProviderRequestPolicy,
+  n as resolveProviderEndpoint,
+  r as resolveProviderRequestCapabilities,
+} from "../provider-attribution-SP5uub3O.js";
+import {
+  a as createProviderHttpError,
+  c as formatProviderErrorPayload,
+  d as truncateErrorDetail,
+  i as assertOkOrThrowProviderError,
+  l as formatProviderHttpErrorMessage,
+  o as extractProviderErrorDetail,
+  r as assertOkOrThrowHttpError,
+  s as extractProviderRequestId,
+  u as readResponseTextLimited,
+} from "../provider-http-errors-Gz46brs9.js";
+import {
+  c as resolveProviderRequestHeaders,
+  o as normalizeBaseUrl,
+  u as sanitizeConfiguredModelProviderRequest,
+} from "../provider-request-config-B-kAAqy2.js";
+import {
+  a as postJsonRequest,
+  c as requireTranscriptionText,
+  d as resolveProviderOperationTimeoutMs,
+  f as waitProviderOperationPollInterval,
+  i as pollProviderOperationJson,
+  l as resolveAudioTranscriptionUploadFileName,
+  n as createProviderOperationDeadline,
+  o as postMultipartRequest,
+  r as fetchWithTimeoutGuarded,
+  s as postTranscriptionRequest,
+  t as buildAudioTranscriptionFormData,
+  u as resolveProviderHttpRequestConfig,
+} from "../shared-DqfWqGL5.js";
+import "../provider-http-C6-kkFY-.js";
+export {
+  assertOkOrThrowHttpError,
+  assertOkOrThrowProviderError,
+  buildAudioTranscriptionFormData,
+  createProviderHttpError,
+  createProviderOperationDeadline,
+  extractProviderErrorDetail,
+  extractProviderRequestId,
+  fetchWithTimeout,
+  fetchWithTimeoutGuarded,
+  formatProviderErrorPayload,
+  formatProviderHttpErrorMessage,
+  normalizeBaseUrl,
+  pollProviderOperationJson,
+  postJsonRequest,
+  postMultipartRequest,
+  postTranscriptionRequest,
+  readResponseTextLimited,
+  requireTranscriptionText,
+  resolveAudioTranscriptionUploadFileName,
+  resolveProviderEndpoint,
+  resolveProviderHttpRequestConfig,
+  resolveProviderOperationTimeoutMs,
+  resolveProviderRequestCapabilities,
+  resolveProviderRequestHeaders,
+  resolveProviderRequestPolicy,
+  sanitizeConfiguredModelProviderRequest,
+  truncateErrorDetail,
+  waitProviderOperationPollInterval,
+};

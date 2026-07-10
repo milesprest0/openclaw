@@ -34,6 +34,7 @@ import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
 
 type EmbeddedAgentRunResult = Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
+const FAILOVER_TIMEOUT_ERROR_RE = /\b(timeout|timed out|etimedout|deadline exceeded)\b/i;
 
 export function createFollowupRunner(params: {
   opts?: GetReplyOptions;
@@ -359,6 +360,18 @@ export function createFollowupRunner(params: {
         const message = formatErrorMessage(err);
         replyOperation.fail("run_failed", err);
         defaultRuntime.error?.(`Followup agent failed before reply: ${message}`);
+        await sendFollowupPayloads(
+          [
+            {
+              text: FAILOVER_TIMEOUT_ERROR_RE.test(message)
+                ? "⚠️ I couldn't finish this reply before the model timeout. Please retry this thread message."
+                : "⚠️ I couldn't generate a reply for this message. Please retry.",
+              isError: true,
+            },
+          ],
+          effectiveQueued,
+          { provider: run.provider, modelId: run.model },
+        );
         return;
       }
 

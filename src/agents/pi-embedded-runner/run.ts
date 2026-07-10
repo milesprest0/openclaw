@@ -2318,7 +2318,9 @@ export async function runEmbeddedPiAgent(
                 failedModel: assistantFailoverOutcome.error.model ?? modelId,
               });
             }
-            throw assistantFailoverOutcome.error;
+            if (assistantFailoverReason !== "timeout") {
+              throw assistantFailoverOutcome.error;
+            }
           }
           const usageMeta = buildUsageAgentMetaFields({
             usageAccumulator,

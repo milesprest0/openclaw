@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyContextBudgetGuard } from "./context-budget.js";
 
 function makeUser(content: string): AgentMessage {
-  return { role: "user", content, timestamp: 0 } as unknown as AgentMessage;
+  return { role: "user", content, timestamp: 0 } as AgentMessage;
 }
 
 function makeAssistantToolUse(params: {

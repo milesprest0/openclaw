@@ -59,6 +59,7 @@ import {
   startSlackSocketAndWaitForDisconnect,
   type SlackBoltResolvedExports,
 } from "./provider-support.js";
+import { createSlackReconciler, resolveReconcilePeriodMs } from "./reconcile.js";
 import {
   formatUnknownError,
   getSocketEmitter,
@@ -359,6 +360,18 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
     : undefined;
 
   const handleSlackMessage = createSlackMessageHandler({ ctx, account, trackEvent });
+  // PATCH-022: missed-event reconciler (source port of dist-patches 007/011/016,
+  // which died when a rebuild changed their hashed bundle target). Replays
+  // socket-dropped mentions — including THREAD replies — on connect + periodically.
+  const slackReconciler = createSlackReconciler({
+    client: app.client as unknown as Parameters<typeof createSlackReconciler>[0]["client"],
+    runtime,
+    handleSlackMessage,
+    getBotUserId: () => botUserId,
+    getChannelIds: () =>
+      Object.keys(ctx.channelsConfig ?? {}).filter((k) => k !== "*" && /^[CDG][A-Z0-9]+$/.test(k)),
+    periodMs: resolveReconcilePeriodMs(process.env.PREST0N_SLACK_RECONCILE_MS),
+  });
   if (
     isSlackExecApprovalClientEnabled({
       cfg,
@@ -530,6 +543,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
     if (slackMode === "socket") {
       let reconnectAttempts = 0;
       let hasLoggedSocketConnected = false;
+      slackReconciler.start(opts.abortSignal);
       while (!opts.abortSignal?.aborted) {
         try {
           const disconnect = await startSlackSocketAndWaitForDisconnect({
@@ -538,6 +552,9 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
             onStarted: () => {
               reconnectAttempts = 0;
               publishSlackConnectedStatus(opts.setStatus);
+              // PATCH-022: reconcile on EVERY (re)connect — Slack does not
+              // replay events lost while the socket was down.
+              slackReconciler.scheduleReconcile("connect");
               if (!hasLoggedSocketConnected) {
                 hasLoggedSocketConnected = true;
                 runtime.log?.("slack socket mode connected");

@@ -699,14 +699,6 @@ async function executeVideoGenerationJob(params: {
   ];
   const lines = [
     `Generated ${totalCount} video${totalCount === 1 ? "" : "s"} with ${result.provider}/${result.model}.`,
-    // Capability boundary: when nothing renderable came back, make the limit
-    // explicit in one line so the reply never implies a finished video file was
-    // produced. Vendor-neutral wording (no provider/model/framework naming).
-    ...(totalCount === 0
-      ? [
-          "Note: I can draft a script, shot list, or storyboard, but cannot render or export a finished video file in this environment.",
-        ]
-      : []),
     ...(warning ? [`Warning: ${warning}`] : []),
     typeof requestedDurationSeconds === "number" &&
     typeof normalizedDurationSeconds === "number" &&

@@ -764,6 +764,7 @@ export function applyContextBudgetGuard(params: {
   prompt?: string;
   promptImages?: readonly PromptInlineImage[];
   persistedHistoryFrozenWatermark?: number;
+  allowTurnDrop?: boolean;
 }): ContextBudgetGuardResult {
   const budget = resolveContextBudget({
     cfg: params.cfg,
@@ -831,7 +832,12 @@ export function applyContextBudgetGuard(params: {
     };
   }
 
-  while (estimatedTokens > budget.budgetBeforeReserve && currentMessages.length > 0) {
+  const allowTurnDrop = params.allowTurnDrop !== false;
+  while (
+    allowTurnDrop &&
+    estimatedTokens > budget.budgetBeforeReserve &&
+    currentMessages.length > 0
+  ) {
     const dropCount = resolveDropCountForOldestTurn(currentMessages);
     if (dropCount <= 0) {
       break;

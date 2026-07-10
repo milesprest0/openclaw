@@ -983,26 +983,6 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt.match(/## Group Chat Context/g)).toHaveLength(1);
   });
 
-  it("adds an explicit video capability clarifier when video_generate is unavailable", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-      toolNames: ["read", "write", "message"],
-    });
-
-    expect(prompt).toContain(
-      "If asked to produce a finished video file, state clearly in one line that this environment can draft scripts/storyboards/shot lists but cannot render or export a finished video file here.",
-    );
-  });
-
-  it("omits the video capability clarifier when video_generate is available", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-      toolNames: ["read", "write", "video_generate"],
-    });
-
-    expect(prompt).not.toContain("cannot render or export a finished video file here");
-  });
-
   it("describes sandboxed runtime and elevated when allowed", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

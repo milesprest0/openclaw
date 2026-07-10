@@ -304,8 +304,56 @@ describe("subagent-orphan-recovery", () => {
     expect(result.skipped).toBe(0);
   });
 
-  it("skips sessions with missing session entry in store", async () => {
-    await expectSkippedRecovery({});
+  it("restarts in-flight runs with a missing session entry from their task brief (PATCH-021)", async () => {
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "restarted-run" } as never);
+    vi.mocked(sessions.loadSessionStore).mockReturnValue({});
+
+    const result = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => createActiveRuns(createTestRunRecord()),
+    });
+
+    expect(result.recovered).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(gateway.callGateway).toHaveBeenCalledTimes(1);
+  });
+
+  it("still skips ENDED runs with a missing session entry (tombstones, PATCH-021)", async () => {
+    vi.mocked(sessions.loadSessionStore).mockReturnValue({});
+
+    const result = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => createActiveRuns(createTestRunRecord({ endedAt: Date.now() - 1_000 })),
+    });
+
+    expect(result.recovered).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(gateway.callGateway).not.toHaveBeenCalled();
+  });
+
+  it("restarts the base run exactly once and never its orphaned -rerun twin (PATCH-021B)", async () => {
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "restarted-run" } as never);
+    vi.mocked(sessions.loadSessionStore).mockReturnValue({});
+
+    const original = createTestRunRecord() as any;
+    const rerunTwin = createTestRunRecord() as any;
+    rerunTwin.childSessionKey = `${String(original.childSessionKey)}-rerun`;
+    for (const rec of [original, rerunTwin]) {
+      rec.lastCheckpointAt = 0;
+      rec.lastActivityAt = 0;
+      rec.heartbeatAt = 0;
+      rec.updatedAt = 0;
+    }
+    const runs = createActiveRuns(original) as any;
+    if (runs instanceof Map) runs.set("zz-stale-rerun", rerunTwin);
+    else runs["zz-stale-rerun"] = rerunTwin;
+
+    const result = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => runs,
+    });
+
+    expect(result.recovered).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(gateway.callGateway).toHaveBeenCalledTimes(1);
+    expect(rerunTwin.supersededAt).toBeGreaterThan(0);
   });
 
   it("clears abortedLastRun flag after successful resume", async () => {

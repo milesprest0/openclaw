@@ -1,0 +1,55 @@
+import {
+  S as resolveWritableRenameTargetsForBridge,
+  _ as createRemoteShellSandboxFsBridge,
+  a as getSandboxBackendManager,
+  b as createWritableRenameTargetResolver,
+  c as buildExecRemoteCommand,
+  d as createSshSandboxSessionFromConfigText,
+  f as createSshSandboxSessionFromSettings,
+  g as uploadDirectoryToSshTarget,
+  h as shellEscape,
+  i as getSandboxBackendFactory,
+  l as buildRemoteCommand,
+  m as runSshSandboxCommand,
+  o as registerSandboxBackend,
+  p as disposeSshSandboxSession,
+  s as requireSandboxBackendFactory,
+  u as buildSshSandboxArgv,
+  x as resolveWritableRenameTargets,
+} from "../browser-bridges-JLeYbMLd.js";
+import {
+  i as withTempWorkspaceSync,
+  n as tempWorkspaceSync,
+  r as withTempWorkspace,
+  t as tempWorkspace,
+} from "../private-temp-workspace-DKvr8oLR.js";
+import { t as runPluginCommandWithTimeout } from "../run-command-Cuy0oYll.js";
+import { t as sanitizeEnvVars } from "../sanitize-env-vars-BhxumuQr.js";
+import { n as resolvePreferredOpenClawTmpDir } from "../tmp-openclaw-dir-B4r8YQhH.js";
+import "../sandbox-Dw1F-7_z.js";
+export {
+  buildExecRemoteCommand,
+  buildRemoteCommand,
+  buildSshSandboxArgv,
+  createRemoteShellSandboxFsBridge,
+  createSshSandboxSessionFromConfigText,
+  createSshSandboxSessionFromSettings,
+  createWritableRenameTargetResolver,
+  disposeSshSandboxSession,
+  getSandboxBackendFactory,
+  getSandboxBackendManager,
+  registerSandboxBackend,
+  requireSandboxBackendFactory,
+  resolvePreferredOpenClawTmpDir,
+  resolveWritableRenameTargets,
+  resolveWritableRenameTargetsForBridge,
+  runPluginCommandWithTimeout,
+  runSshSandboxCommand,
+  sanitizeEnvVars,
+  shellEscape,
+  tempWorkspace,
+  tempWorkspaceSync,
+  uploadDirectoryToSshTarget,
+  withTempWorkspace,
+  withTempWorkspaceSync,
+};

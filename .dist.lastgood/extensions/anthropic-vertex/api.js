@@ -1,0 +1,34 @@
+import {
+  i as resolveImplicitAnthropicVertexProvider,
+  n as createAnthropicVertexStreamFnForModel,
+  r as mergeImplicitAnthropicVertexProvider,
+  t as createAnthropicVertexStreamFn,
+} from "../../api-RzQy6F-Y.js";
+import {
+  n as buildAnthropicVertexProvider,
+  t as ANTHROPIC_VERTEX_DEFAULT_MODEL_ID,
+} from "../../provider-catalog-CyJs9qL6.js";
+import {
+  a as resolveAnthropicVertexProjectId,
+  i as resolveAnthropicVertexConfigApiKey,
+  n as hasAnthropicVertexCredentials,
+  o as resolveAnthropicVertexRegion,
+  r as resolveAnthropicVertexClientRegion,
+  s as resolveAnthropicVertexRegionFromBaseUrl,
+  t as hasAnthropicVertexAvailableAuth,
+} from "../../region-DbbVgbk-.js";
+export {
+  ANTHROPIC_VERTEX_DEFAULT_MODEL_ID,
+  buildAnthropicVertexProvider,
+  createAnthropicVertexStreamFn,
+  createAnthropicVertexStreamFnForModel,
+  hasAnthropicVertexAvailableAuth,
+  hasAnthropicVertexCredentials,
+  mergeImplicitAnthropicVertexProvider,
+  resolveAnthropicVertexClientRegion,
+  resolveAnthropicVertexConfigApiKey,
+  resolveAnthropicVertexProjectId,
+  resolveAnthropicVertexRegion,
+  resolveAnthropicVertexRegionFromBaseUrl,
+  resolveImplicitAnthropicVertexProvider,
+};

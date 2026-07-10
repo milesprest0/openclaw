@@ -268,6 +268,38 @@ describe("context budget guard", () => {
     expect(result.messages).not.toHaveLength(0);
   });
 
+  it("keeps full turns when turn dropping is disabled", () => {
+    const hugeChunk = "B".repeat(140_000);
+    const messages: AgentMessage[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      messages.push(makeUserMessage(`turn-${i} ${hugeChunk}`));
+      messages.push(makeAssistantMessage(`ack-${i}`));
+    }
+
+    const result = applyContextBudgetGuard({
+      messages,
+      cfg: {
+        agents: {
+          defaults: {
+            contextBudget: {
+              enabled: true,
+              maxAssembledTokens: 12_000,
+              reserveTokens: 2_000,
+            },
+          },
+        },
+      },
+      contextWindowTokens: 200_000,
+      prompt: "new prompt",
+      allowTurnDrop: false,
+    });
+
+    expect(result.messages).toHaveLength(messages.length);
+    expect(result.droppedTurns).toBe(0);
+    expect(result.estimatedTokens).toBeGreaterThan(result.budgetBeforeReserve);
+    expect(result.applied).toBe(false);
+  });
+
   it("keeps p99 assembled tokens at or below 32000 with targetBand enabled", () => {
     const tokenEstimates: number[] = [];
 
