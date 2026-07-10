@@ -51,6 +51,7 @@ export const HARD_MAX_TOOL_RESULT_CHARS = DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS;
  */
 const MIN_KEEP_CHARS = 2_000;
 const RECOVERY_MIN_KEEP_CHARS = 0;
+const MAINTENANCE_LOCK_TIMEOUT_CAP_MS = 10_000;
 
 type ToolResultTruncationOptions = {
   suffix?: string | ((truncatedChars: number) => string);
@@ -773,11 +774,15 @@ export async function truncateOversizedToolResultsInSession(params: {
 }): Promise<{ truncated: boolean; truncatedCount: number; reason?: string }> {
   const { sessionFile, contextWindowTokens } = params;
   let sessionLock: Awaited<ReturnType<typeof acquireSessionWriteLock>> | undefined;
+  const writeLockTimeoutMs = Math.min(
+    resolveSessionWriteLockAcquireTimeoutMs(params.config),
+    MAINTENANCE_LOCK_TIMEOUT_CAP_MS,
+  );
 
   try {
     sessionLock = await acquireSessionWriteLock({
       sessionFile,
-      timeoutMs: resolveSessionWriteLockAcquireTimeoutMs(params.config),
+      timeoutMs: writeLockTimeoutMs,
     });
     const state = await readTranscriptFileState(sessionFile);
     return await truncateOversizedToolResultsInTranscriptState({

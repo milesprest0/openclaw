@@ -620,6 +620,44 @@ describe("truncateOversizedToolResultsInSession", () => {
       ),
     ).toBe(true);
   });
+
+  it("caps persisted truncation lock waits to avoid long contention stalls", async () => {
+    const dir = await createTmpDir();
+    const sm = SessionManager.create(dir, dir);
+    sm.appendMessage(makeUserMessage("hello"));
+    sm.appendMessage(makeAssistantMessage("calling tools"));
+    sm.appendMessage(makeToolResult("x".repeat(500_000), "call_1"));
+    const sessionFile = sm.getSessionFile()!;
+
+    const acquireSessionWriteLockMock = vi.fn(async () => ({
+      release: async () => {},
+    }));
+
+    vi.resetModules();
+    vi.doMock("../session-write-lock.js", async () => {
+      const actual = await vi.importActual<typeof import("../session-write-lock.js")>(
+        "../session-write-lock.js",
+      );
+      return {
+        ...actual,
+        acquireSessionWriteLock: acquireSessionWriteLockMock,
+      };
+    });
+
+    const mod = await import("./tool-result-truncation.js");
+    await mod.truncateOversizedToolResultsInSession({
+      sessionFile,
+      contextWindowTokens: 128_000,
+      config: { session: { writeLock: { acquireTimeoutMs: 90_000 } } },
+    });
+
+    expect(acquireSessionWriteLockMock).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 10_000 }),
+    );
+
+    vi.doUnmock("../session-write-lock.js");
+    await loadFreshToolResultTruncationModuleForTest();
+  });
 });
 
 describe("truncateToolResultText head+tail strategy", () => {

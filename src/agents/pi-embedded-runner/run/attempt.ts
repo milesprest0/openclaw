@@ -3173,6 +3173,7 @@ export async function runEmbeddedAttempt(
                 prompt: promptForModel,
                 promptImages: imageResult.images,
                 persistedHistoryFrozenWatermark,
+                allowTurnDrop: false,
               });
             } catch (err) {
               log.warn(
