@@ -34,10 +34,24 @@
  * reply. A wedged deferral expires loudly after maxDeferMs (default 30
  * min) and is DROPPED, never double-spawned.
  *
+ * PATCH-022C busy-ack (2026-07-14 thread-busy-silence incident): a 022B
+ * deferral was silent by design toward Slack — users pinging a thread whose
+ * registered run was still working saw NOTHING until the run terminated and
+ * their mentions replayed (2026-07-14 ~00:00Z: ~4 min of apparent deafness
+ * while mission-fintech-to-financial ran to completion; users re-pinged and
+ * concluded the bot was down). On the FIRST deferral in a thread, post one
+ * short in-thread ack so humans know the mention was seen and queued.
+ * Acks are rate-limited per thread and carry an invisible marker
+ * (BUSY_ACK_MARKER) that the visible-bot-reply check IGNORES — a busy-ack
+ * must never count as the reply that cancels the deferred replay it is
+ * announcing.
+ *
  * Config: env only — the old `channels.slack.reconcile*` keys are
  * schema-rejected and stripped by the boot config-fix.
  * `PREST0N_SLACK_RECONCILE_MS` overrides the sweep period
  * (default 120000ms; "0" disables the periodic sweep; floor 15000ms).
+ * `PREST0N_SLACK_BUSY_ACK_MS` overrides the per-thread busy-ack minimum
+ * interval (default 240000ms; "0" disables busy-acks; floor 60000ms).
  */
 import type { SlackMessageHandler } from "./message-handler.js";
 
@@ -47,6 +61,24 @@ const LOOKBACK_SEC = 600;
 const MAX_THREAD_SCANS_PER_CHANNEL = 8;
 const HISTORY_LIMIT = 50;
 const DEFAULT_MAX_DEFER_MS = 30 * 60_000;
+const DEFAULT_BUSY_ACK_MS = 240_000;
+const MIN_BUSY_ACK_MS = 60_000;
+const BUSY_ACK_MAP_PRUNE_SIZE = 512;
+const BUSY_ACK_MAP_PRUNE_AGE_MS = 3_600_000;
+
+/**
+ * PATCH-022C: invisible marker appended to every busy-ack. The
+ * visible-bot-reply check ignores messages carrying it, so an ack can never
+ * be mistaken for the actual reply and silently cancel a deferred replay.
+ * (ZWSP + INVISIBLE SEPARATOR + ZWSP — survives Slack round-trips, never
+ * produced by agent-authored replies.)
+ */
+export const BUSY_ACK_MARKER = "\u200b\u2063\u200b";
+
+/** PATCH-022C: the one message a deferral is allowed to say out loud. */
+export const BUSY_ACK_TEXT =
+  "⏳ Still working on this thread's background task — your message is queued and I'll reply as soon as it wraps up." +
+  BUSY_ACK_MARKER;
 
 /**
  * PATCH-022B: well-known global slot where the gateway core registers the
@@ -93,6 +125,10 @@ type SlackConversationsClient = {
       limit: number;
     }) => Promise<{ messages?: SlackHistoryMessage[] } | undefined>;
   };
+  /** PATCH-022C: optional — a client without chat simply never busy-acks. */
+  chat?: {
+    postMessage: (args: { channel: string; thread_ts?: string; text: string }) => Promise<unknown>;
+  };
 };
 
 /** Exported for tests. "0" disables; blank/invalid -> default; floor 15s. */
@@ -110,6 +146,21 @@ export function resolveReconcilePeriodMs(raw: string | undefined): number | null
   return Math.max(MIN_PERIOD_MS, Math.floor(n));
 }
 
+/** PATCH-022C. Exported for tests. "0" disables; blank/invalid -> default; floor 60s. */
+export function resolveBusyAckMs(raw: string | undefined): number | null {
+  if (raw === undefined || raw.trim() === "") {
+    return DEFAULT_BUSY_ACK_MS;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    return DEFAULT_BUSY_ACK_MS;
+  }
+  if (n === 0) {
+    return null;
+  }
+  return Math.max(MIN_BUSY_ACK_MS, Math.floor(n));
+}
+
 export function createSlackReconciler(params: {
   client: SlackConversationsClient;
   runtime: ReconcileRuntime;
@@ -121,6 +172,8 @@ export function createSlackReconciler(params: {
   isThreadWorkPending?: PendingThreadWorkProbe;
   /** PATCH-022B: max suppression age before a wedged deferral is dropped. */
   maxDeferMs?: number;
+  /** PATCH-022C: per-thread busy-ack min interval; null disables; undefined = default. */
+  busyAckMs?: number | null;
 }) {
   const { client, runtime, handleSlackMessage, getBotUserId, getChannelIds } = params;
   const lastTsByChannel = new Map<string, string>();
@@ -148,13 +201,73 @@ export function createSlackReconciler(params: {
       firstDeferredAtMs: number;
     }
   >();
+  // ── PATCH-022C busy-ack state ──
+  const busyAckMs = params.busyAckMs === undefined ? DEFAULT_BUSY_ACK_MS : params.busyAckMs;
+  const busyAckAtByThread = new Map<string, number>();
+  /**
+   * PATCH-022C: a busy-ack is bookkeeping, not an answer — it must never
+   * satisfy the visible-bot-reply check, or the ack would cancel the very
+   * replay it announces.
+   */
+  const isBusyAck = (r: SlackHistoryMessage): boolean =>
+    typeof r?.text === "string" && r.text.includes(BUSY_ACK_MARKER);
   const botRepliedAfter = (
     mentionTs: string,
     msgs: SlackHistoryMessage[] | undefined,
     botUserId: string,
   ): boolean =>
     Array.isArray(msgs) &&
-    msgs.some((r) => Boolean(r?.ts) && r.user === botUserId && String(r.ts) > String(mentionTs));
+    msgs.some(
+      (r) =>
+        Boolean(r?.ts) && r.user === botUserId && String(r.ts) > String(mentionTs) && !isBusyAck(r),
+    );
+
+  /**
+   * PATCH-022C: one short in-thread ack when a mention is deferred behind a
+   * registered run — a silent deferral reads as a dead bot (2026-07-14).
+   * Rate-limited per thread; posting failures are contained and retried by
+   * the next deferral in that thread; never affects replay bookkeeping.
+   */
+  const maybePostBusyAck = async (
+    channelId: string,
+    threadTs: string | undefined,
+    mentionTs: string,
+  ): Promise<void> => {
+    if (busyAckMs === null) {
+      return;
+    }
+    const chat = client.chat;
+    if (!chat || typeof chat.postMessage !== "function") {
+      return;
+    }
+    const anchor = threadTs ?? mentionTs;
+    const threadKey = `${channelId}:${anchor}`;
+    const now = Date.now();
+    const last = busyAckAtByThread.get(threadKey);
+    if (last !== undefined && now - last < busyAckMs) {
+      return;
+    }
+    if (busyAckAtByThread.size > BUSY_ACK_MAP_PRUNE_SIZE) {
+      for (const [k, at] of busyAckAtByThread) {
+        if (now - at > BUSY_ACK_MAP_PRUNE_AGE_MS) {
+          busyAckAtByThread.delete(k);
+        }
+      }
+    }
+    // Stamp before the await: several deferrals in one sweep = one ack.
+    busyAckAtByThread.set(threadKey, now);
+    try {
+      await chat.postMessage({ channel: channelId, thread_ts: anchor, text: BUSY_ACK_TEXT });
+      runtime.log?.(
+        `[slack:reconcile] busy-ack posted channel=${channelId} thread=${anchor} (PATCH-022C)`,
+      );
+    } catch (err) {
+      busyAckAtByThread.delete(threadKey); // let the next deferral in this thread retry
+      runtime.error?.(
+        `[slack:reconcile] busy-ack post FAILED channel=${channelId} thread=${anchor}: ${String(err)} (PATCH-022C)`,
+      );
+    }
+  };
 
   const replayMention = async (
     m: SlackHistoryMessage,
@@ -189,6 +302,7 @@ export function createSlackReconciler(params: {
    * PATCH-022B replay gate. responded (visible bot reply after the mention) →
    * drop; pending work registered for the thread → defer (re-checked each
    * sweep); otherwise replay now. Returns true iff a replay was dispatched.
+   * PATCH-022C: the first deferral in a thread posts a rate-limited busy-ack.
    */
   const maybeReplayMention = async (
     m: SlackHistoryMessage,
@@ -208,6 +322,8 @@ export function createSlackReconciler(params: {
         runtime.log?.(
           `[slack:reconcile] deferring replay channel=${channelId} ts=${m.ts}: pending work registered for this thread (PATCH-022B)`,
         );
+        // PATCH-022C: tell the humans — a silent deferral reads as a dead bot.
+        await maybePostBusyAck(channelId, threadTs, String(m.ts));
       }
       return false;
     }

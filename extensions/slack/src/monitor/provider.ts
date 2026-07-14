@@ -59,7 +59,7 @@ import {
   startSlackSocketAndWaitForDisconnect,
   type SlackBoltResolvedExports,
 } from "./provider-support.js";
-import { createSlackReconciler, resolveReconcilePeriodMs } from "./reconcile.js";
+import { createSlackReconciler, resolveBusyAckMs, resolveReconcilePeriodMs } from "./reconcile.js";
 import {
   formatUnknownError,
   getSocketEmitter,
@@ -363,6 +363,8 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
   // PATCH-022: missed-event reconciler (source port of dist-patches 007/011/016,
   // which died when a rebuild changed their hashed bundle target). Replays
   // socket-dropped mentions — including THREAD replies — on connect + periodically.
+  // PATCH-022C: mentions deferred behind a registered run get a rate-limited
+  // in-thread busy-ack (PREST0N_SLACK_BUSY_ACK_MS; 0 disables).
   const slackReconciler = createSlackReconciler({
     client: app.client as unknown as Parameters<typeof createSlackReconciler>[0]["client"],
     runtime,
@@ -371,6 +373,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
     getChannelIds: () =>
       Object.keys(ctx.channelsConfig ?? {}).filter((k) => k !== "*" && /^[CDG][A-Z0-9]+$/.test(k)),
     periodMs: resolveReconcilePeriodMs(process.env.PREST0N_SLACK_RECONCILE_MS),
+    busyAckMs: resolveBusyAckMs(process.env.PREST0N_SLACK_BUSY_ACK_MS),
   });
   if (
     isSlackExecApprovalClientEnabled({
