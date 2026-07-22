@@ -17,6 +17,7 @@ import {
   resolveAnthropicPayloadPolicy,
 } from "./anthropic-payload-policy.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./copilot-dynamic-headers.js";
+import { noteCurrentSession, stampBody } from "./prest0n-egress-attribution.js";
 import { resolveProviderEndpoint } from "./provider-attribution.js";
 import { buildGuardedModelFetch } from "./provider-transport-fetch.js";
 import { transformTransportMessages } from "./transport-message-transform.js";
@@ -901,8 +902,13 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
         if (nextParams !== undefined) {
           params = nextParams as Record<string, unknown>;
         }
+        // Prest0n egress attribution (native 024 Points B+C): note the live session for the
+        // opt-in ambient fallback, then stamp body.metadata with prest0n_* fields — the
+        // fleet proxy reads AND STRIPS them before upstream egress (existing metadata keys
+        // like user_id are preserved). Fail-open by contract.
+        noteCurrentSession(transportOptions.sessionId);
         const anthropicStream = client.messages.stream(
-          { ...params, stream: true },
+          stampBody({ ...params, stream: true }, { sessionId: transportOptions.sessionId }),
           transportOptions.signal ? { signal: transportOptions.signal } : undefined,
         );
         stream.push({ type: "start", partial: output as never });

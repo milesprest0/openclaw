@@ -29,6 +29,7 @@ import { resolveProviderTransportTurnStateWithPlugin } from "../plugins/provider
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./copilot-dynamic-headers.js";
 import { detectOpenAICompletionsCompat } from "./openai-completions-compat.js";
 import { flattenCompletionMessagesToStringContent } from "./openai-completions-string-content.js";
+import { noteCurrentSession, stampBody } from "./prest0n-egress-attribution.js";
 import { resolveOpenAIReasoningEffortMap } from "./openai-reasoning-compat.js";
 import {
   isOpenAIGpt54MiniModel,
@@ -1351,6 +1352,11 @@ export function createOpenAICompletionsTransportStreamFn(): StreamFn {
         if (nextParams !== undefined) {
           params = nextParams as typeof params;
         }
+        // Prest0n egress attribution (native 024 Point D): stamp params.metadata with
+        // prest0n_* fields — the fleet proxy reads AND STRIPS them before upstream egress.
+        // Fail-open by contract: stampBody returns params untouched on any doubt.
+        noteCurrentSession(options?.sessionId);
+        params = stampBody(params, { sessionId: options?.sessionId });
         const responseStream = (await client.chat.completions.create(
           params as never,
           buildOpenAISdkRequestOptions(model, options?.signal),
