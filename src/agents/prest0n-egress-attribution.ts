@@ -97,7 +97,9 @@ export type AttributionApi = {
 
 let warnedOnce: Record<string, true> = Object.create(null);
 function warnOnce(key: string, msg: string): void {
-  if (warnedOnce[key]) return;
+  if (warnedOnce[key]) {
+    return;
+  }
   warnedOnce[key] = true;
   try {
     console.warn(`${PREST0N_ATTRIBUTION_MARKER} WARN ${msg}`);
@@ -108,10 +110,14 @@ function warnOnce(key: string, msg: string): void {
 
 function envKindPatterns(): Array<{ re: RegExp; kind: SessionKind }> {
   const raw = process.env.PREST0N_ATTR_KIND_PATTERNS;
-  if (!raw) return [];
+  if (!raw) {
+    return [];
+  }
   try {
     const arr = JSON.parse(raw) as unknown;
-    if (!Array.isArray(arr)) return [];
+    if (!Array.isArray(arr)) {
+      return [];
+    }
     return arr
       .filter(
         (e): e is { pattern: string; kind: SessionKind } =>
@@ -127,9 +133,15 @@ function envKindPatterns(): Array<{ re: RegExp; kind: SessionKind }> {
 }
 
 function conforming(value: unknown, maxLen: number): string | null {
-  if (typeof value !== "string" || value === "") return null;
-  if (value.length > maxLen) return null;
-  if (!TOKEN_RE.test(value)) return null;
+  if (typeof value !== "string" || value === "") {
+    return null;
+  }
+  if (value.length > maxLen) {
+    return null;
+  }
+  if (!TOKEN_RE.test(value)) {
+    return null;
+  }
   return value;
 }
 
@@ -140,17 +152,27 @@ function createState(): AttributionState {
 function makeApi(state: AttributionState): AttributionApi {
   function registerSession(meta: SessionMeta): boolean {
     try {
-      if (!meta || typeof meta.sessionId !== "string" || meta.sessionId === "") return false;
+      if (!meta || typeof meta.sessionId !== "string" || meta.sessionId === "") {
+        return false;
+      }
       const entry: RegistryEntry = {};
-      if (typeof meta.taskLabel === "string" && meta.taskLabel) entry.taskLabel = meta.taskLabel;
-      if (meta.kind && KINDS.has(meta.kind)) entry.kind = meta.kind;
-      if (typeof meta.turnClass === "string" && meta.turnClass) entry.turnClass = meta.turnClass;
+      if (typeof meta.taskLabel === "string" && meta.taskLabel) {
+        entry.taskLabel = meta.taskLabel;
+      }
+      if (meta.kind && KINDS.has(meta.kind)) {
+        entry.kind = meta.kind;
+      }
+      if (typeof meta.turnClass === "string" && meta.turnClass) {
+        entry.turnClass = meta.turnClass;
+      }
       const prev = state.registry.get(meta.sessionId);
       state.registry.set(meta.sessionId, prev ? { ...prev, ...entry } : entry);
       // Bounded: evict oldest insertions past the cap (Map preserves insertion order).
       while (state.registry.size > REGISTRY_CAP) {
         const oldest = state.registry.keys().next().value;
-        if (oldest === undefined) break;
+        if (oldest === undefined) {
+          break;
+        }
         state.registry.delete(oldest);
       }
       return true;
@@ -160,36 +182,52 @@ function makeApi(state: AttributionState): AttributionApi {
   }
 
   function lookupSession(sessionId: string | undefined): RegistryEntry | undefined {
-    if (typeof sessionId !== "string" || sessionId === "") return undefined;
+    if (typeof sessionId !== "string" || sessionId === "") {
+      return undefined;
+    }
     const exact = state.registry.get(sessionId);
-    if (exact) return exact;
+    if (exact) {
+      return exact;
+    }
     // Spawn-time registrations may be keyed by session KEY while the transport sees a
     // derived id (or vice versa) — accept an entry whose key is a suffix/prefix component
     // of the observed id, longest key first for determinism.
     let best: { entry: RegistryEntry; keyLen: number } | undefined;
     for (const [key, entry] of state.registry) {
-      if (key.length < 8) continue; // too short to be a safe substring witness
+      if (key.length < 8) {
+        continue; // too short to be a safe substring witness
+      }
       if (sessionId.includes(key) || key.includes(sessionId)) {
-        if (!best || key.length > best.keyLen) best = { entry, keyLen: key.length };
+        if (!best || key.length > best.keyLen) {
+          best = { entry, keyLen: key.length };
+        }
       }
     }
     return best?.entry;
   }
 
   function deriveKind(sessionId: unknown): SessionKind | undefined {
-    if (typeof sessionId !== "string" || sessionId === "") return undefined;
+    if (typeof sessionId !== "string" || sessionId === "") {
+      return undefined;
+    }
     for (const { re, kind } of envKindPatterns()) {
-      if (re.test(sessionId)) return kind;
+      if (re.test(sessionId)) {
+        return kind;
+      }
     }
     for (const { re, kind } of KIND_PATTERNS) {
-      if (re.test(sessionId)) return kind;
+      if (re.test(sessionId)) {
+        return kind;
+      }
     }
     return undefined; // indeterminate → caller omits (never guess)
   }
 
   function noteCurrentSession<T>(sessionId: T): T {
     try {
-      if (typeof sessionId === "string" && sessionId !== "") state.ambientSessionId = sessionId;
+      if (typeof sessionId === "string" && sessionId !== "") {
+        state.ambientSessionId = sessionId;
+      }
     } catch {
       /* fail-open */
     }
@@ -208,7 +246,9 @@ function makeApi(state: AttributionState): AttributionApi {
       const meta = lookupSession(sessionId) ?? {};
       const kind = meta.kind && KINDS.has(meta.kind) ? meta.kind : deriveKind(sessionId);
       let label = typeof meta.taskLabel === "string" ? meta.taskLabel : undefined;
-      if (!label && kind) label = DEFAULT_LABEL_BY_KIND[kind];
+      if (!label && kind) {
+        label = DEFAULT_LABEL_BY_KIND[kind];
+      }
       let turnClass = typeof meta.turnClass === "string" ? meta.turnClass : undefined;
       if (!turnClass && kind) {
         turnClass = kind === "cron" ? "cron" : kind === "heartbeat" ? "heartbeat" : "interactive";
@@ -216,13 +256,21 @@ function makeApi(state: AttributionState): AttributionApi {
 
       const headers: AttributionHeaders = {};
       const sid = conforming(sessionId, MAX_LEN.sessionId);
-      if (sid) headers["X-Prest0n-Session-Id"] = sid;
+      if (sid) {
+        headers["X-Prest0n-Session-Id"] = sid;
+      }
       const k = conforming(kind, MAX_LEN.kind);
-      if (k) headers["X-Prest0n-Session-Kind"] = k;
+      if (k) {
+        headers["X-Prest0n-Session-Kind"] = k;
+      }
       const lbl = conforming(label, MAX_LEN.label);
-      if (lbl) headers["X-Prest0n-Task-Label"] = lbl;
+      if (lbl) {
+        headers["X-Prest0n-Task-Label"] = lbl;
+      }
       const tc = conforming(turnClass, MAX_LEN.turnClass);
-      if (tc) headers["X-Prest0n-Turn-Class"] = tc;
+      if (tc) {
+        headers["X-Prest0n-Turn-Class"] = tc;
+      }
       if (sessionId && !k) {
         warnOnce(
           `kind:${String(sessionId).slice(0, 24)}`,
@@ -239,10 +287,18 @@ function makeApi(state: AttributionState): AttributionApi {
     try {
       const h = headersFor(ctx);
       const fields: AttributionBodyFields = {};
-      if (h["X-Prest0n-Task-Label"]) fields.prest0n_task_label = h["X-Prest0n-Task-Label"];
-      if (h["X-Prest0n-Session-Kind"]) fields.prest0n_session_kind = h["X-Prest0n-Session-Kind"];
-      if (h["X-Prest0n-Session-Id"]) fields.prest0n_session_id = h["X-Prest0n-Session-Id"];
-      if (h["X-Prest0n-Turn-Class"]) fields.prest0n_turn_class = h["X-Prest0n-Turn-Class"];
+      if (h["X-Prest0n-Task-Label"]) {
+        fields.prest0n_task_label = h["X-Prest0n-Task-Label"];
+      }
+      if (h["X-Prest0n-Session-Kind"]) {
+        fields.prest0n_session_kind = h["X-Prest0n-Session-Kind"];
+      }
+      if (h["X-Prest0n-Session-Id"]) {
+        fields.prest0n_session_id = h["X-Prest0n-Session-Id"];
+      }
+      if (h["X-Prest0n-Turn-Class"]) {
+        fields.prest0n_turn_class = h["X-Prest0n-Turn-Class"];
+      }
       return fields;
     } catch {
       return {};
@@ -255,11 +311,19 @@ function makeApi(state: AttributionState): AttributionApi {
    * returns the input untouched on any doubt; never throws into the request path. */
   function stampBody<T>(body: T, ctx?: AttributionContext): T {
     try {
-      if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return body;
+      }
       const fields = bodyFieldsFor(ctx);
-      if (Object.keys(fields).length === 0) return body;
+      if (Object.keys(fields).length === 0) {
+        return body;
+      }
       const carrier = body as { metadata?: Record<string, string> };
-      if (!carrier.metadata || typeof carrier.metadata !== "object" || Array.isArray(carrier.metadata)) {
+      if (
+        !carrier.metadata ||
+        typeof carrier.metadata !== "object" ||
+        Array.isArray(carrier.metadata)
+      ) {
         carrier.metadata = {};
       }
       Object.assign(carrier.metadata, fields);
@@ -287,7 +351,7 @@ function makeApi(state: AttributionState): AttributionApi {
 function resolveSharedApi(): AttributionApi {
   try {
     const g = globalThis as Record<PropertyKey, unknown>;
-    const existing = g[SYMBOL as unknown as PropertyKey] as AttributionApi | undefined;
+    const existing = g[SYMBOL] as AttributionApi | undefined;
     if (
       existing &&
       typeof existing.headersFor === "function" &&
@@ -296,7 +360,7 @@ function resolveSharedApi(): AttributionApi {
       return existing;
     }
     const api = makeApi(createState());
-    g[SYMBOL as unknown as PropertyKey] = api;
+    g[SYMBOL] = api;
     return api;
   } catch {
     return makeApi(createState()); // still return a working local API
@@ -315,7 +379,7 @@ export const noteCurrentSession: AttributionApi["noteCurrentSession"] = (session
 export const deriveKind: AttributionApi["deriveKind"] = (sessionId) => shared.deriveKind(sessionId);
 
 /** Test hook: fresh isolated state + warn-once reset (does not touch the global slot). */
-export function _makeIsolatedForTest(): AttributionApi {
+export function makeIsolatedAttributionForTest(): AttributionApi {
   warnedOnce = Object.create(null);
   return makeApi(createState());
 }
