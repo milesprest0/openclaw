@@ -6,6 +6,7 @@ import {
   describeEmbeddedAgentStreamStrategy,
   resolveEmbeddedAgentApiKey,
   resolveEmbeddedAgentStreamFn,
+  withRunSessionId,
 } from "./stream-resolution.js";
 
 // Wrap createBoundaryAwareStreamFnForModel with a spy that delegates to the
@@ -384,5 +385,41 @@ describe("resolveEmbeddedAgentStreamFn", () => {
     await expect(
       streamFn({ provider: "openai-codex", id: "gpt-5.5" } as never, { systemPrompt } as never, {}),
     ).resolves.toMatchObject({ systemPrompt });
+  });
+});
+
+describe("withRunSessionId", () => {
+  it("defaults options.sessionId to the run session id when absent", async () => {
+    const inner = vi.fn(async (_model, _context, options) => options);
+    const wrapped = withRunSessionId(inner as never, "0198d2f0-0000-7000-8000-000000000001");
+    await wrapped({} as never, {} as never, { apiKey: "k" } as never);
+    expect(inner).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ apiKey: "k", sessionId: "0198d2f0-0000-7000-8000-000000000001" }),
+    );
+  });
+
+  it("never overrides a caller-provided sessionId", async () => {
+    const inner = vi.fn(async (_model, _context, options) => options);
+    const wrapped = withRunSessionId(inner as never, "run-session");
+    await wrapped({} as never, {} as never, { sessionId: "pi-session" } as never);
+    expect(inner).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ sessionId: "pi-session" }),
+    );
+  });
+
+  it("handles undefined options and is a no-op without a run session id", async () => {
+    const inner = vi.fn(async (_model, _context, options) => options);
+    const wrapped = withRunSessionId(inner as never, "run-session");
+    await wrapped({} as never, {} as never, undefined);
+    expect(inner).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ sessionId: "run-session" }),
+    );
+    expect(withRunSessionId(inner as never, undefined)).toBe(inner);
   });
 });

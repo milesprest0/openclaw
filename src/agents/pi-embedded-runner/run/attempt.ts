@@ -228,7 +228,13 @@ import {
   resolveEmbeddedAgentApiKey,
   resolveEmbeddedAgentBaseStreamFn,
   resolveEmbeddedAgentStreamFn,
+  withRunSessionId,
 } from "../stream-resolution.js";
+import {
+  deriveKind,
+  noteCurrentSession,
+  registerSession,
+} from "../../prest0n-egress-attribution.js";
 import { applySystemPromptOverrideToSession } from "../system-prompt.js";
 import { dropReasoningFromHistory, dropThinkingBlocks } from "../thinking.js";
 import {
@@ -686,6 +692,14 @@ export async function runEmbeddedAttempt(
   log.debug(
     `embedded run start: runId=${params.runId} sessionId=${params.sessionId} provider=${params.provider} model=${params.modelId} thinking=${params.thinkLevel} messageChannel=${params.messageChannel ?? params.messageProvider ?? "unknown"}`,
   );
+  // Egress attribution: transports only ever see the transcript UUID, which
+  // matches no kind pattern — register the routing-key-derived kind under the
+  // UUID so session_kind (and the kind-default task label) stamp on egress.
+  noteCurrentSession(params.sessionId);
+  const attributionKind = deriveKind(params.sessionKey ?? params.sessionId);
+  if (attributionKind) {
+    registerSession({ sessionId: params.sessionId, kind: attributionKind });
+  }
   const prepStages = createEmbeddedRunStageTracker();
   const emitPrepStageSummary = (phase: string) => {
     const summary = prepStages.snapshot();
@@ -2010,17 +2024,20 @@ export async function runEmbeddedAttempt(
         wsApiKey,
         model: params.model,
       });
-      activeSession.agent.streamFn = resolveEmbeddedAgentStreamFn({
-        currentStreamFn: defaultSessionStreamFn,
-        providerStreamFn,
-        shouldUseWebSocketTransport,
-        wsApiKey,
-        sessionId: params.sessionId,
-        signal: runAbortController.signal,
-        model: params.model,
-        resolvedApiKey: params.resolvedApiKey,
-        authStorage: params.authStorage,
-      });
+      activeSession.agent.streamFn = withRunSessionId(
+        resolveEmbeddedAgentStreamFn({
+          currentStreamFn: defaultSessionStreamFn,
+          providerStreamFn,
+          shouldUseWebSocketTransport,
+          wsApiKey,
+          sessionId: params.sessionId,
+          signal: runAbortController.signal,
+          model: params.model,
+          resolvedApiKey: params.resolvedApiKey,
+          authStorage: params.authStorage,
+        }),
+        params.sessionId,
+      );
       const providerTextTransforms = resolveProviderTextTransforms({
         provider: params.provider,
         config: params.config,
