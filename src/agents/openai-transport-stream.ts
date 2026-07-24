@@ -1394,7 +1394,7 @@ async function processOpenAICompletionsStream(
         thoughtSignature?: string;
       }
     | null = null;
-  let pendingPostToolCallDeltas: CompletionsReasoningDelta[] = [];
+  let pendingPostToolCallDeltas: CompletionsDelta[] = [];
   let pendingPostToolCallBytes = 0;
   let currentToolCallArgumentBytes = 0;
   let isFlushingPendingPostToolCallDeltas = false;
@@ -1413,7 +1413,7 @@ async function processOpenAICompletionsStream(
       output.content[blockIndex()] = completed;
     }
   };
-  const queuePostToolCallDelta = (next: CompletionsReasoningDelta) => {
+  const queuePostToolCallDelta = (next: CompletionsDelta) => {
     const nextBytes = measureUtf8Bytes(next.text);
     if (pendingPostToolCallBytes + nextBytes > MAX_POST_TOOL_CALL_BUFFER_BYTES) {
       throw new Error("Exceeded post-tool-call delta buffer limit");
@@ -1430,6 +1430,14 @@ async function processOpenAICompletionsStream(
         return;
       }
       previous.text += next.text;
+      return;
+    }
+    if (
+      next.kind === "text" &&
+      previous.kind === "text" &&
+      previous.visibility !== next.visibility
+    ) {
+      pendingPostToolCallDeltas.push(next);
       return;
     }
     previous.text += next.text;
@@ -1575,10 +1583,14 @@ async function processOpenAICompletionsStream(
         queuePostToolCallDelta({ ...reasoningDelta });
         continue;
       }
-      if (reasoningDelta.kind === "text") {
+      if (reasoningDelta.kind === "text" && reasoningDelta.visibility === "reasoning_details") {
         appendTextDelta(reasoningDelta.text);
       } else {
-        appendThinkingDelta(reasoningDelta);
+        appendThinkingDelta(
+          reasoningDelta.kind === "thinking"
+            ? reasoningDelta
+            : { kind: "thinking", signature: "reasoning_details", text: reasoningDelta.text },
+        );
       }
     }
     if (choice.delta.tool_calls && choice.delta.tool_calls.length > 0) {
@@ -1653,7 +1665,7 @@ async function processOpenAICompletionsStream(
   }
 }
 
-type CompletionsReasoningDelta =
+type CompletionsDelta =
   | {
       kind: "thinking";
       signature: string;
@@ -1661,12 +1673,13 @@ type CompletionsReasoningDelta =
     }
   | {
       kind: "text";
+      visibility: "content" | "reasoning_details";
       text: string;
     };
 
-function getCompletionsContentDeltas(content: unknown): CompletionsReasoningDelta[] {
+function getCompletionsContentDeltas(content: unknown): CompletionsDelta[] {
   if (typeof content === "string") {
-    return content ? [{ kind: "text", text: content }] : [];
+    return content ? [{ kind: "text", visibility: "content", text: content }] : [];
   }
   if (Array.isArray(content)) {
     return content.flatMap((item) => getCompletionsContentDeltas(item));
@@ -1702,7 +1715,7 @@ function getCompletionsContentDeltas(content: unknown): CompletionsReasoningDelt
     return [{ kind: "thinking", signature: "content", text }];
   }
   if (type === "text" || type === "output_text" || type.endsWith(".output_text")) {
-    return [{ kind: "text", text }];
+    return [{ kind: "text", visibility: "content", text }];
   }
   return [];
 }
@@ -1710,9 +1723,9 @@ function getCompletionsContentDeltas(content: unknown): CompletionsReasoningDelt
 function getCompletionsReasoningDeltas(
   delta: Record<string, unknown>,
   visibleReasoningDetailTypes: readonly string[],
-): CompletionsReasoningDelta[] {
-  const output: CompletionsReasoningDelta[] = [];
-  const pushDelta = (next: CompletionsReasoningDelta) => {
+): CompletionsDelta[] {
+  const output: CompletionsDelta[] = [];
+  const pushDelta = (next: CompletionsDelta) => {
     const previous = output[output.length - 1];
     if (!previous || previous.kind !== next.kind) {
       output.push(next);
@@ -1724,6 +1737,10 @@ function getCompletionsReasoningDeltas(
         return;
       }
       previous.text += next.text;
+      return;
+    }
+    if (previous.visibility !== next.visibility) {
+      output.push(next);
       return;
     }
     previous.text += next.text;
@@ -1743,7 +1760,7 @@ function getCompletionsReasoningDeltas(
         continue;
       }
       if (typeof detail.type === "string" && visibleTypes.has(detail.type)) {
-        pushDelta({ kind: "text", text: detail.text });
+        pushDelta({ kind: "text", visibility: "reasoning_details", text: detail.text });
       }
     }
   }

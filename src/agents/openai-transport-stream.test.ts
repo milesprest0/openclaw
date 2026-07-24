@@ -4368,6 +4368,96 @@ describe("openai transport stream", () => {
     ]);
   });
 
+  it("keeps reasoning_content out of visible text for non-minimax openrouter completions", async () => {
+    const model = {
+      id: "openrouter/deepseek/deepseek-r1",
+      name: "DeepSeek R1",
+      api: "openai-completions",
+      provider: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200000,
+      maxTokens: 8192,
+    } satisfies Model<"openai-completions">;
+
+    const output = {
+      role: "assistant" as const,
+      content: [],
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    };
+
+    const stream: { push(event: unknown): void } = { push() {} };
+
+    const mockChunks = [
+      {
+        id: "chatcmpl-deepseek",
+        object: "chat.completion.chunk" as const,
+        choices: [
+          {
+            index: 0,
+            delta: {
+              content: "",
+              reasoning_content: "Twlevel'mFoundl'm finishingVer",
+            } as Record<string, unknown>,
+            logprobs: null,
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        id: "chatcmpl-deepseek",
+        object: "chat.completion.chunk" as const,
+        choices: [
+          {
+            index: 0,
+            delta: {
+              content: "## Fax batch - 12 documents triaged",
+            } as Record<string, unknown>,
+            logprobs: null,
+            finish_reason: "stop" as const,
+          },
+        ],
+      },
+    ] as const;
+
+    async function* mockStream() {
+      for (const chunk of mockChunks) {
+        yield chunk as never;
+      }
+    }
+
+    await __testing.processOpenAICompletionsStream(mockStream(), output, model, stream);
+
+    expect(output.content).toMatchObject([
+      {
+        type: "thinking",
+        thinking: "Twlevel'mFoundl'm finishingVer",
+        thinkingSignature: "reasoning_content",
+      },
+      { type: "text", text: "## Fax batch - 12 documents triaged" },
+    ]);
+    const visibleText = output.content
+      .filter((block): block is { type: "text"; text: string } => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    expect(visibleText).toBe("## Fax batch - 12 documents triaged");
+    expect(visibleText).not.toContain("Twlevel'mFoundl'm finishingVer");
+  });
+
   it("keeps a streaming tool call intact when visible reasoning text arrives mid-call", async () => {
     const model = {
       id: "openrouter/minimax/minimax-m2.7",
