@@ -315,13 +315,13 @@ describe("model-selection", () => {
         name: "normalizes retired google gemini 3 pro preview ids",
         variants: ["google/gemini-3-pro-preview", "gemini-3-pro-preview"],
         defaultProvider: "google",
-        expected: { provider: "google", model: "gemini-3.1-pro-preview" },
+        expected: { provider: "google", model: "~google/gemini-pro-latest" },
       },
       {
         name: "normalizes retired gemini cli 3 pro preview ids",
         variants: ["google-gemini-cli/gemini-3-pro-preview"],
         defaultProvider: "google",
-        expected: { provider: "google-gemini-cli", model: "gemini-3.1-pro-preview" },
+        expected: { provider: "google-gemini-cli", model: "~google/gemini-pro-latest" },
       },
       {
         name: "normalizes gemini 3.1 flash-lite ids",
@@ -431,10 +431,10 @@ describe("model-selection", () => {
 
     it("normalizes retired Gemini ids while migrating legacy Gemini CLI refs", () => {
       expect(migrateLegacyRuntimeModelRef("google-gemini-cli/gemini-3-pro-preview")).toEqual({
-        ref: "google/gemini-3.1-pro-preview",
+        ref: "google/~google/gemini-pro-latest",
         legacyProvider: "google-gemini-cli",
         provider: "google",
-        model: "gemini-3.1-pro-preview",
+        model: "~google/gemini-pro-latest",
         runtime: "google-gemini-cli",
         cli: true,
       });
@@ -945,7 +945,7 @@ describe("model-selection", () => {
 
       expect(result.allowedKeys.has("openai/gpt-4o")).toBe(true);
       expect(result.allowedKeys.has("anthropic/claude-sonnet-4-6")).toBe(true);
-      expect(result.allowedKeys.has("google/gemini-3.1-pro-preview")).toBe(true);
+      expect(result.allowedKeys.has("google/~google/gemini-pro-latest")).toBe(true);
       expect(result.allowAny).toBe(false);
     });
 
