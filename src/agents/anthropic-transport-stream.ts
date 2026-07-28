@@ -17,7 +17,7 @@ import {
   resolveAnthropicPayloadPolicy,
 } from "./anthropic-payload-policy.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./copilot-dynamic-headers.js";
-import { noteCurrentSession, stampBody } from "./prest0n-egress-attribution.js";
+import { headersFor, noteCurrentSession } from "./prest0n-egress-attribution.js";
 import { resolveProviderEndpoint } from "./provider-attribution.js";
 import { buildGuardedModelFetch } from "./provider-transport-fetch.js";
 import { transformTransportMessages } from "./transport-message-transform.js";
@@ -654,6 +654,15 @@ function createAnthropicTransportClient(params: {
   const needsInterleavedBeta =
     (options?.interleavedThinking ?? true) && !supportsAdaptiveThinking(model.id);
   const fetch = buildGuardedModelFetch(model);
+  // Prest0n egress attribution rides HEADERS on the Anthropic path, never the body.
+  // The Messages API validates `metadata` strictly against { user_id } — which is why
+  // buildAnthropicParams narrows caller metadata to that single key — so writing
+  // prest0n_* into body.metadata makes every direct-Anthropic request fail with a 400.
+  // Unknown headers are ignored by endpoints that do not understand them, so this is
+  // safe for direct Anthropic, Copilot, and Anthropic-compatible third parties alike,
+  // and fleetModelProxy already reads X-Prest0n-* as an attribution source.
+  // Merged ahead of model.headers/options.headers so explicit config still wins.
+  const attributionHeaders = headersFor({ sessionId: options?.sessionId });
   if (model.provider === "github-copilot") {
     const betaFeatures = needsInterleavedBeta ? ["interleaved-thinking-2025-05-14"] : [];
     return {
@@ -667,6 +676,7 @@ function createAnthropicTransportClient(params: {
             "anthropic-dangerous-direct-browser-access": "true",
             ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
           },
+          attributionHeaders,
           model.headers,
           buildCopilotDynamicHeaders({
             messages: context.messages,
@@ -698,6 +708,7 @@ function createAnthropicTransportClient(params: {
             "user-agent": `claude-cli/${CLAUDE_CODE_VERSION}`,
             "x-app": "cli",
           },
+          attributionHeaders,
           model.headers,
           options?.headers,
         ),
@@ -717,6 +728,7 @@ function createAnthropicTransportClient(params: {
           "anthropic-dangerous-direct-browser-access": "true",
           ...(betaHeader ? { "anthropic-beta": betaHeader } : {}),
         },
+        attributionHeaders,
         model.headers,
         options?.headers,
       ),
@@ -902,13 +914,13 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
         if (nextParams !== undefined) {
           params = nextParams as Record<string, unknown>;
         }
-        // Prest0n egress attribution (native 024 Points B+C): note the live session for the
-        // opt-in ambient fallback, then stamp body.metadata with prest0n_* fields — the
-        // fleet proxy reads AND STRIPS them before upstream egress (existing metadata keys
-        // like user_id are preserved). Fail-open by contract.
+        // Prest0n egress attribution (native 024 Point B): note the live session for the
+        // opt-in ambient fallback. The body is deliberately NOT stamped here — Anthropic's
+        // `metadata` accepts only user_id, so attribution rides X-Prest0n-* request headers
+        // instead (see createAnthropicClientForModel). Fail-open by contract.
         noteCurrentSession(transportOptions.sessionId);
         const anthropicStream = client.messages.stream(
-          stampBody({ ...params, stream: true }, { sessionId: transportOptions.sessionId }),
+          { ...params, stream: true },
           transportOptions.signal ? { signal: transportOptions.signal } : undefined,
         );
         stream.push({ type: "start", partial: output as never });

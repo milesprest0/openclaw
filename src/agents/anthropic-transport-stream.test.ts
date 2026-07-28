@@ -902,4 +902,48 @@ describe("anthropic transport stream", () => {
       output_config: { effort: "xhigh" },
     });
   });
+  // Regression: the Messages API validates `metadata` strictly against { user_id }
+  // (buildAnthropicParams narrows caller metadata to that single key for exactly this
+  // reason). Egress attribution must therefore ride request headers, never body.metadata
+  // — stamping prest0n_* into the body 400s every direct-Anthropic request.
+  it("carries prest0n attribution on headers and never in body.metadata", async () => {
+    const model = makeAnthropicTransportModel();
+
+    await runTransportStream(
+      model,
+      { messages: [{ role: "user", content: "hello" }] } as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        sessionId: "0198d2f0-1111-7000-8000-00000000abcd",
+      } as AnthropicStreamOptions,
+    );
+
+    const { payload } = latestAnthropicRequest();
+    const metadata = payload.metadata as Record<string, unknown> | undefined;
+    for (const key of Object.keys(metadata ?? {})) {
+      expect(key.startsWith("prest0n_")).toBe(false);
+    }
+    expect(JSON.stringify(payload)).not.toContain("prest0n_");
+
+    expect(latestAnthropicRequestHeaders().get("X-Prest0n-Session-Id")).toBe(
+      "0198d2f0-1111-7000-8000-00000000abcd",
+    );
+  });
+
+  it("preserves the caller user_id metadata whitelist alongside header attribution", async () => {
+    const model = makeAnthropicTransportModel();
+
+    await runTransportStream(
+      model,
+      { messages: [{ role: "user", content: "hello" }] } as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        sessionId: "0198d2f0-1111-7000-8000-00000000abcd",
+        metadata: { user_id: "user-42" },
+      } as AnthropicStreamOptions,
+    );
+
+    const { payload } = latestAnthropicRequest();
+    expect(payload.metadata).toEqual({ user_id: "user-42" });
+  });
 });
