@@ -68,7 +68,7 @@ describe("model-selection plugin runtime normalization", () => {
       }),
     ).toEqual({
       provider: "google",
-      model: "gemini-3.1-pro-preview",
+      model: "~google/gemini-pro-latest",
     });
     expect(normalizeProviderModelIdWithPluginMock).not.toHaveBeenCalled();
   });
