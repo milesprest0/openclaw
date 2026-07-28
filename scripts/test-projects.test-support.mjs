@@ -47,6 +47,14 @@ import { resolveVitestCliEntry, resolveVitestNodeArgs } from "./run-vitest.mjs";
 
 const DEFAULT_VITEST_CONFIG = "test/vitest/vitest.unit.config.ts";
 const AGENTS_VITEST_CONFIG = "test/vitest/vitest.agents.config.ts";
+// Split agents lanes. These MUST be registered in VITEST_CONFIG_BY_KIND below:
+// an unregistered config path is not recognised as a whole-suite target, so it
+// falls through to the tooling suite and is scoped to a glob that matches no
+// test files — the shard then reports green having run nothing.
+const AGENTS_CORE_VITEST_CONFIG = "test/vitest/vitest.agents-core.config.ts";
+const AGENTS_PI_EMBEDDED_VITEST_CONFIG = "test/vitest/vitest.agents-pi-embedded.config.ts";
+const AGENTS_SUPPORT_VITEST_CONFIG = "test/vitest/vitest.agents-support.config.ts";
+const AGENTS_TOOLS_VITEST_CONFIG = "test/vitest/vitest.agents-tools.config.ts";
 const ACP_VITEST_CONFIG = "test/vitest/vitest.acp.config.ts";
 const AUTO_REPLY_CORE_VITEST_CONFIG = "test/vitest/vitest.auto-reply-core.config.ts";
 const AUTO_REPLY_VITEST_CONFIG = "test/vitest/vitest.auto-reply.config.ts";
@@ -228,6 +236,10 @@ const CHANGED_ARGS_PATTERN = /^--changed(?:=(.+))?$/u;
 const VITEST_CONFIG_BY_KIND = {
   acp: ACP_VITEST_CONFIG,
   agent: AGENTS_VITEST_CONFIG,
+  agentCore: AGENTS_CORE_VITEST_CONFIG,
+  agentPiEmbedded: AGENTS_PI_EMBEDDED_VITEST_CONFIG,
+  agentSupport: AGENTS_SUPPORT_VITEST_CONFIG,
+  agentTools: AGENTS_TOOLS_VITEST_CONFIG,
   autoReplyCore: AUTO_REPLY_CORE_VITEST_CONFIG,
   autoReplyReply: AUTO_REPLY_REPLY_VITEST_CONFIG,
   autoReplyTopLevel: AUTO_REPLY_TOP_LEVEL_VITEST_CONFIG,
@@ -1380,6 +1392,10 @@ export function buildVitestRunPlans(
     "autoReplyReply",
     "autoReplyTopLevel",
     "agent",
+    "agentCore",
+    "agentPiEmbedded",
+    "agentSupport",
+    "agentTools",
     "plugin",
     "ui",
     "unitSrc",

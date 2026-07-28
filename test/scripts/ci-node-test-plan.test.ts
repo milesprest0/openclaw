@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import fg from "fast-glob";
 import { describe, expect, it } from "vitest";
 import { createNodeTestShards } from "../../scripts/lib/ci-node-test-plan.mjs";
+import { buildVitestRunPlans } from "../../scripts/test-projects.test-support.mjs";
 import { commandsLightTestFiles } from "../vitest/vitest.commands-light-paths.mjs";
 import { createPluginsVitestConfig } from "../vitest/vitest.plugins.config.ts";
 
@@ -425,5 +426,30 @@ describe("scripts/lib/ci-node-test-plan.mjs", () => {
 
     expect(actual).toEqual(listTestFiles("src/auto-reply/reply"));
     expect(new Set(actual).size).toBe(actual.length);
+  });
+  // Regression guard (2026-07-28): the four split agents configs were added to the CI
+  // shard plan but never registered in test-projects' config->kind map or its ordered
+  // kind list. An unregistered config path is not recognised as a whole-suite target,
+  // so `test-projects.mjs <config>` silently produced ZERO run plans — the
+  // checks-node-agentic-agents shard reported green in 3.34s having run no tests, and
+  // every agents-layer test (transports, embedded runner, attribution) was dark in CI.
+  // Assert that every config the CI plan can dispatch actually resolves to itself.
+  it("dispatches every planned config as its own whole-suite run", () => {
+    const configs = [...new Set(createNodeTestShards().flatMap((shard) => shard.configs))];
+    expect(configs.length).toBeGreaterThan(0);
+
+    const unresolved: string[] = [];
+    for (const config of configs) {
+      const plans = buildVitestRunPlans([config], process.cwd());
+      const matched =
+        plans.length === 1 && plans[0]?.config === config && plans[0]?.includePatterns === null;
+      if (!matched) {
+        unresolved.push(
+          `${config} -> ${plans.length === 0 ? "no plans" : plans.map((plan) => plan.config).join(", ")}`,
+        );
+      }
+    }
+
+    expect(unresolved).toEqual([]);
   });
 });
