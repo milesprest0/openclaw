@@ -110,11 +110,20 @@ export function createLiveTargetMatcher(params: {
         return false;
       }
       const directRef = `${normalizedProvider}/${normalizedModelId}`;
+      // Filters are canonicalised through the provider's preview-id normaliser in
+      // parseModelTarget, so the OBSERVED id must be canonicalised the same way —
+      // otherwise a retired alias never matches the replacement it normalises to
+      // (gemini-3-pro-preview and gemini-3.1-pro-preview both canonicalise to
+      // ~google/gemini-pro-latest, but only the filter side was being mapped).
+      const canonicalModelId =
+        normalizeOptionalLowercaseString(
+          normalizeLiveTargetModelId(normalizedProvider, normalizedModelId),
+        ) ?? normalizedModelId;
       for (const target of modelTargets) {
         if (normalizeOptionalLowercaseString(target.raw) === directRef) {
           return true;
         }
-        if (target.modelId !== normalizedModelId) {
+        if (target.modelId !== normalizedModelId && target.modelId !== canonicalModelId) {
           continue;
         }
         if (!target.provider) {

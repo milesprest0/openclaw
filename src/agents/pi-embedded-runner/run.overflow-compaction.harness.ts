@@ -460,7 +460,13 @@ export async function loadRunOverflowCompactionHarness(): Promise<{
     resolveProfilesUnavailableReason: vi.fn(() => undefined),
   }));
 
-  vi.doMock("../usage.js", () => ({
+  // Spread the real module rather than listing exports: this harness backs 11 run.*
+  // suites, and a bare factory silently breaks every one of them the moment
+  // usage.ts grows an export the runtime calls (buildUsageAgentMetaFields started
+  // calling sanitizePerCallCacheUsage, which took all of them down). Only the two
+  // helpers these suites assert on are stubbed.
+  vi.doMock("../usage.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../usage.js")>()),
     normalizeUsage: vi.fn((usage?: unknown) =>
       usage && typeof usage === "object" ? usage : undefined,
     ),
