@@ -1055,11 +1055,19 @@ describe("runContextEngineMaintenance", () => {
         });
         await Promise.resolve();
 
-        const maintain = vi.fn(async () => ({
-          changed: false,
-          bytesFreed: 0,
-          rewrittenEntries: 0,
-        }));
+        // Advance fake time so the run's "started" and terminal events do not land on
+        // the SAME millisecond. Task delivery shares one lastNotifiedEventAt watermark
+        // between state-change and terminal messages, so an instantaneous maintain()
+        // lets the "started" delivery swallow the "done" notice. Real maintenance
+        // rewrites transcripts and always takes >0ms; the 0ms mock is the unrealistic bit.
+        const maintain = vi.fn(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+          return {
+            changed: false,
+            bytesFreed: 0,
+            rewrittenEntries: 0,
+          };
+        });
         const backgroundEngine = {
           info: {
             id: "test",

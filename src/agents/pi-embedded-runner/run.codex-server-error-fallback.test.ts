@@ -30,7 +30,12 @@ describe("runEmbeddedPiAgent Codex server_error fallback handoff", () => {
     const rawCodexError =
       'Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request."},"sequence_number":2}';
 
-    mockedClassifyFailoverReason.mockReturnValue("timeout");
+    // A 5xx server_error is a recoverable SERVER-side failure, not a timeout.
+    // The distinction decides the outcome: with "timeout" the failover policy
+    // deliberately declines to throw so run.ts can synthesize its dedicated
+    // timeout payload (see the surface_error note in run/assistant-failover.ts),
+    // which makes the FailoverError this test asserts unreachable.
+    mockedClassifyFailoverReason.mockReturnValue("overloaded");
     mockedIsFailoverAssistantError.mockReturnValue(true);
     mockedFormatAssistantErrorText.mockReturnValue(
       "LLM error server_error: An error occurred while processing your request.",
