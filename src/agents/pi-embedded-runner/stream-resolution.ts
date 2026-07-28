@@ -139,6 +139,22 @@ export function resolveEmbeddedAgentStreamFn(params: {
   return currentStreamFn;
 }
 
+/**
+ * Guarantee the run's transcript session id reaches the transport stream
+ * options. pi-agent-core supplies options.sessionId from Agent.sessionId, but
+ * that snapshot is taken once at session creation (and can rotate on
+ * compaction/branch), and older bundles omit it entirely. Egress attribution
+ * (patch-024 native port) and the OpenAI prompt_cache_key both read
+ * options.sessionId, so default it per call. Caller-provided ids win.
+ */
+export function withRunSessionId(inner: StreamFn, sessionId: string | undefined): StreamFn {
+  if (!sessionId) {
+    return inner;
+  }
+  return (model, context, options) =>
+    inner(model, context, options?.sessionId ? options : { ...options, sessionId });
+}
+
 function wrapEmbeddedAgentStreamFn(
   inner: StreamFn,
   params: {

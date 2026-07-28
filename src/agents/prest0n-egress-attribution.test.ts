@@ -87,6 +87,21 @@ describe("prest0n egress attribution (native 024 port)", () => {
     expect(h["X-Prest0n-Turn-Class"]).toBe("cron");
   });
 
+  it("registered kind wins for shape-indeterminate ids (transcript UUIDs) and drives label defaults", () => {
+    // The embedded runner registers the routing-key-derived kind under the
+    // transcript UUID (attempt.ts run start) — transports only see the UUID.
+    const api = makeIsolatedAttributionForTest();
+    const uuid = "0198d2f0-1111-7000-8000-00000000abcd";
+    expect(api.deriveKind(uuid)).toBeUndefined(); // UUID matches no pattern
+    api.registerSession({ sessionId: uuid, kind: "orchestrator" });
+    const h = api.headersFor({ sessionId: uuid });
+    expect(h["X-Prest0n-Session-Id"]).toBe(uuid);
+    expect(h["X-Prest0n-Session-Kind"]).toBe("orchestrator");
+    expect(h["X-Prest0n-Task-Label"]).toBe("vm-orchestrator"); // kind-default label
+    const f = api.bodyFieldsFor({ sessionId: uuid });
+    expect(f.prest0n_session_kind).toBe("orchestrator");
+  });
+
   it("registry substring lookup matches key↔id containment (longest key wins), short keys excluded", () => {
     const api = makeIsolatedAttributionForTest();
     api.registerSession({ sessionId: "subagent:ab1a3c69", taskLabel: "short-key-label" });
