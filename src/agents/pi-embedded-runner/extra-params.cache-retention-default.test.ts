@@ -125,11 +125,25 @@ describe("cacheRetention default behavior", () => {
     });
   });
 
-  it("returns undefined for non-Anthropic providers", () => {
+  // OpenAI is prompt-cache eligible (isOpenAIPromptCacheEligible), so it defaults to
+  // the advisory "short" hint rather than undefined — OpenAI's implicit prefix cache
+  // is already active at >=1,024 tokens and the value does not disable it.
+  it("defaults to short for prompt-cache-eligible OpenAI providers", () => {
     const agent: { streamFn?: StreamFn } = {};
     const cfg = undefined;
     const provider = "openai";
     const modelId = "gpt-4";
+
+    applyExtraParamsToAgent(agent, cfg, provider, modelId);
+
+    expect(resolveCacheRetention(cfg, provider, undefined, modelId)).toBe("short");
+  });
+
+  it("returns undefined for providers with no prompt cache support", () => {
+    const agent: { streamFn?: StreamFn } = {};
+    const cfg = undefined;
+    const provider = "xai";
+    const modelId = "grok-4";
 
     applyExtraParamsToAgent(agent, cfg, provider, modelId);
 
