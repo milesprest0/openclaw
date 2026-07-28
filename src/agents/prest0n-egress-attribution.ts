@@ -187,23 +187,37 @@ function makeApi(state: AttributionState): AttributionApi {
     }
     const exact = state.registry.get(sessionId);
     if (exact) {
+      touchSession(sessionId, exact);
       return exact;
     }
     // Spawn-time registrations may be keyed by session KEY while the transport sees a
     // derived id (or vice versa) — accept an entry whose key is a suffix/prefix component
     // of the observed id, longest key first for determinism.
-    let best: { entry: RegistryEntry; keyLen: number } | undefined;
+    let best: { key: string; entry: RegistryEntry; keyLen: number } | undefined;
     for (const [key, entry] of state.registry) {
       if (key.length < 8) {
         continue; // too short to be a safe substring witness
       }
       if (sessionId.includes(key) || key.includes(sessionId)) {
         if (!best || key.length > best.keyLen) {
-          best = { entry, keyLen: key.length };
+          best = { key, entry, keyLen: key.length };
         }
       }
     }
+    if (best) {
+      touchSession(best.key, best.entry);
+    }
     return best?.entry;
+  }
+
+  // Recency refresh: eviction walks Map insertion order, so without this a long-lived
+  // hot session (the orchestrator registered at boot) is the FIRST evicted once 1024
+  // distinct sessions have been seen, silently dropping its kind/label mid-run. Re-
+  // inserting on read makes the cap evict the least-recently-USED entry instead.
+  function touchSession(key: string, entry: RegistryEntry): void {
+    if (state.registry.delete(key)) {
+      state.registry.set(key, entry);
+    }
   }
 
   function deriveKind(sessionId: unknown): SessionKind | undefined {

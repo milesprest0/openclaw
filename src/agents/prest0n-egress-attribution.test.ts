@@ -133,6 +133,24 @@ describe("prest0n egress attribution (native 024 port)", () => {
     expect(api._state.registry.has("agent:main:subagent:cap-1029")).toBe(true);
   });
 
+  it("eviction is least-recently-USED, so a hot long-lived session survives the cap", () => {
+    const api = makeIsolatedAttributionForTest();
+    const hot = "agent:main:subagent:hot-00000001";
+    api.registerSession({ sessionId: hot, taskLabel: "long-lived" });
+    for (let i = 0; i < 1023; i += 1) {
+      api.registerSession({
+        sessionId: `agent:main:subagent:fill-${String(i).padStart(4, "0")}`,
+        taskLabel: "filler",
+      });
+      // Keep the first-registered session hot; FIFO would still evict it first.
+      api.headersFor({ sessionId: hot });
+    }
+    api.registerSession({ sessionId: "agent:main:subagent:overflow-1", taskLabel: "last" });
+    expect(api._state.registry.size).toBe(1024);
+    expect(api._state.registry.has(hot)).toBe(true);
+    expect(api.headersFor({ sessionId: hot })["X-Prest0n-Task-Label"]).toBe("long-lived");
+  });
+
   it("env kind patterns prepend and validate; bad JSON ignored", () => {
     process.env.PREST0N_ATTR_KIND_PATTERNS = JSON.stringify([
       { pattern: "^voice-", kind: "cron" },
