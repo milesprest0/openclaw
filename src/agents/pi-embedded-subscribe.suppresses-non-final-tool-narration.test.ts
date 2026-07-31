@@ -107,12 +107,15 @@ describe("subscribeEmbeddedPiSession", () => {
     const partialReplyTexts = extractTextPayloads(onPartialReply.mock.calls);
 
     expect(blockReplyTexts).toEqual(["Here is your demand letter. [ATTORNEY REVIEW REQUIRED]"]);
-    expect(partialReplyTexts).toEqual([]);
+    // The final, non-tool answer streams as a partial reply now that unphased text is
+    // delivered incrementally. What must NOT leak is the tool-call NARRATION from the
+    // two toolUse turns above — that stays suppressed via isNonFinalAssistantMessage.
+    expect(partialReplyTexts).toEqual(["Here is your demand letter. [ATTORNEY REVIEW REQUIRED]"]);
     expect(subscription.assistantTexts).toContain(
       "Here is your demand letter. [ATTORNEY REVIEW REQUIRED]",
     );
 
-    const visiblePayload = blockReplyTexts.join("\n");
+    const visiblePayload = [...blockReplyTexts, ...partialReplyTexts].join("\n");
     const denylist = [
       "I'll pull",
       "batch packager",
@@ -155,6 +158,9 @@ describe("subscribeEmbeddedPiSession", () => {
     expect(extractTextPayloads(onBlockReply.mock.calls)).toEqual([
       "Direct answer without tool calls.",
     ]);
-    expect(extractTextPayloads(onPartialReply.mock.calls)).toEqual([]);
+    // Terminal no-tool text streams incrementally as a partial reply too.
+    expect(extractTextPayloads(onPartialReply.mock.calls)).toEqual([
+      "Direct answer without tool calls.",
+    ]);
   });
 });
