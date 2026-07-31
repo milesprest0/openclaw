@@ -508,12 +508,13 @@ export function handleMessageUpdate(
     !deliveryPhase &&
     Boolean(streamItemId) &&
     isOpenAiResponsesAssistantMessage(partialAssistant);
-  const shouldWithholdUnphasedAssistantStream =
-    ctx.state.suppressNonFinalAssistantText &&
-    !deliveryPhase &&
-    !isPhasePendingOpenAiResponsesTextItem &&
-    !isOpenAiResponsesAssistantMessage(partialAssistant) &&
-    Boolean(chunk);
+  // Unphased text streams. Only the OpenAI WS/responses paths ever mark a delivery
+  // phase, so treating "no phase" as "maybe non-final, withhold" silenced incremental
+  // partials for every phase-less provider (anthropic + openai-completions included)
+  // AND skipped the delta/block-buffer accumulation below, breaking text_end tail
+  // flushes and chunking. suppressNonFinalAssistantText keeps its documented job at
+  // the message_end consumers: shouldSuppressAssistantVisibleOutput drops the text of
+  // turns that end in tool calls, and commentary-phase text stays suppressed above.
   if ((deliveryPhase || isPhasePendingOpenAiResponsesTextItem) && streamItemId) {
     const previousStreamItemId = ctx.state.lastAssistantStreamItemId;
     if (previousStreamItemId && previousStreamItemId !== streamItemId) {
@@ -527,9 +528,6 @@ export function handleMessageUpdate(
     return;
   }
   if (isPhasePendingOpenAiResponsesTextItem) {
-    return;
-  }
-  if (shouldWithholdUnphasedAssistantStream) {
     return;
   }
   const phaseAwareVisibleText = coerceChatContentText(
