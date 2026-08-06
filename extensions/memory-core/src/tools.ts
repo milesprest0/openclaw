@@ -109,6 +109,11 @@ function queueShortTermRecallTracking(params: {
   rawResults: MemorySearchResult[];
   surfacedResults: MemorySearchResult[];
   timezone?: string;
+  recallStoreEviction?: {
+    maxEntries: number;
+    ttlDays: number;
+    minRecallCount: number;
+  };
 }): void {
   const trackingResults = resolveRecallTrackingResults(params.rawResults, params.surfacedResults);
   void recordShortTermRecalls({
@@ -116,6 +121,7 @@ function queueShortTermRecallTracking(params: {
     query: params.query,
     results: trackingResults,
     timezone: params.timezone,
+    recallStoreEviction: params.recallStoreEviction,
   }).catch(() => {
     // Recall tracking is best-effort and must never block memory recall.
   });
@@ -328,16 +334,17 @@ export function createMemorySearchTool(options: {
               ...result,
               corpus: "memory" as const,
             }));
-            const sleepTimezone = resolveMemoryDeepDreamingConfig({
+            const deepDreaming = resolveMemoryDeepDreamingConfig({
               pluginConfig: resolveMemoryCorePluginConfig(cfg),
               cfg,
-            }).timezone;
+            });
             queueShortTermRecallTracking({
               workspaceDir: status.workspaceDir,
               query,
               rawResults,
               surfacedResults: memoryResults,
-              timezone: sleepTimezone,
+              timezone: deepDreaming.timezone,
+              recallStoreEviction: deepDreaming.recall,
             });
             provider = status.provider;
             model = status.model;

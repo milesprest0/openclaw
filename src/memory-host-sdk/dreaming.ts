@@ -39,6 +39,9 @@ export const DEFAULT_MEMORY_DEEP_DREAMING_MIN_RECALL_COUNT = 3;
 export const DEFAULT_MEMORY_DEEP_DREAMING_MIN_UNIQUE_QUERIES = 3;
 export const DEFAULT_MEMORY_DEEP_DREAMING_RECENCY_HALF_LIFE_DAYS = 14;
 export const DEFAULT_MEMORY_DEEP_DREAMING_MAX_AGE_DAYS = 30;
+export const DEFAULT_MEMORY_DEEP_DREAMING_RECALL_MAX_ENTRIES = 5000;
+export const DEFAULT_MEMORY_DEEP_DREAMING_RECALL_TTL_DAYS = 90;
+export const DEFAULT_MEMORY_DEEP_DREAMING_RECALL_MIN_RECALL_COUNT = 2;
 
 export const DEFAULT_MEMORY_DEEP_DREAMING_RECOVERY_ENABLED = true;
 export const DEFAULT_MEMORY_DEEP_DREAMING_RECOVERY_TRIGGER_BELOW_HEALTH = 0.35;
@@ -99,6 +102,12 @@ export type MemoryDeepDreamingRecoveryConfig = {
   autoWriteMinConfidence: number;
 };
 
+export type MemoryDeepDreamingRecallConfig = {
+  maxEntries: number;
+  ttlDays: number;
+  minRecallCount: number;
+};
+
 export type MemoryDeepDreamingConfig = {
   enabled: boolean;
   cron: string;
@@ -108,6 +117,7 @@ export type MemoryDeepDreamingConfig = {
   minUniqueQueries: number;
   recencyHalfLifeDays: number;
   maxAgeDays?: number;
+  recall: MemoryDeepDreamingRecallConfig;
   sources: MemoryDeepDreamingSource[];
   recovery: MemoryDeepDreamingRecoveryConfig;
   execution: MemoryDreamingExecutionConfig;
@@ -386,6 +396,7 @@ export function resolveMemoryDreamingConfig(params: {
   const deep = asNullableRecord(phases?.deep);
   const rem = asNullableRecord(phases?.rem);
   const deepRecovery = asNullableRecord(deep?.recovery);
+  const deepRecall = asNullableRecord(deep?.recall);
   const maxAgeDays = normalizeOptionalPositiveInt(deep?.maxAgeDays);
 
   return {
@@ -453,6 +464,23 @@ export function resolveMemoryDreamingConfig(params: {
           : typeof DEFAULT_MEMORY_DEEP_DREAMING_MAX_AGE_DAYS === "number"
             ? { maxAgeDays: DEFAULT_MEMORY_DEEP_DREAMING_MAX_AGE_DAYS }
             : {}),
+        recall: {
+          maxEntries: Math.max(
+            1,
+            normalizeNonNegativeInt(
+              deepRecall?.maxEntries,
+              DEFAULT_MEMORY_DEEP_DREAMING_RECALL_MAX_ENTRIES,
+            ),
+          ),
+          ttlDays: normalizeNonNegativeInt(
+            deepRecall?.ttlDays,
+            DEFAULT_MEMORY_DEEP_DREAMING_RECALL_TTL_DAYS,
+          ),
+          minRecallCount: normalizeNonNegativeInt(
+            deepRecall?.minRecallCount,
+            DEFAULT_MEMORY_DEEP_DREAMING_RECALL_MIN_RECALL_COUNT,
+          ),
+        },
         sources: normalizeStringArray(
           deep?.sources,
           ["daily", "memory", "sessions", "logs", "recall"] as const,

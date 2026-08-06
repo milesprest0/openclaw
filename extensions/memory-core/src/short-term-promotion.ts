@@ -27,6 +27,9 @@ export const DEFAULT_PROMOTION_MIN_UNIQUE_QUERIES = 2;
 const PROMOTION_MARKER_PREFIX = "openclaw-memory-promotion:";
 const MAX_QUERY_HASHES = 32;
 const MAX_RECALL_DAYS = 16;
+export const DEFAULT_SHORT_TERM_RECALL_MAX_ENTRIES = 5000;
+export const DEFAULT_SHORT_TERM_RECALL_TTL_DAYS = 90;
+export const DEFAULT_SHORT_TERM_RECALL_MIN_RECALL_COUNT = 2;
 const SHORT_TERM_STORE_RELATIVE_PATH = path.join("memory", ".dreams", "short-term-recall.json");
 const SHORT_TERM_PHASE_SIGNAL_RELATIVE_PATH = path.join("memory", ".dreams", "phase-signals.json");
 const SHORT_TERM_LOCK_RELATIVE_PATH = path.join("memory", ".dreams", "short-term-promotion.lock");
@@ -87,6 +90,12 @@ type ShortTermRecallStore = {
   version: 1;
   updatedAt: string;
   entries: Record<string, ShortTermRecallEntry>;
+};
+
+export type ShortTermRecallEvictionOptions = {
+  maxEntries: number;
+  ttlDays: number;
+  minRecallCount: number;
 };
 
 type ShortTermPhaseSignalEntry = {
@@ -541,6 +550,65 @@ function toFiniteNonNegativeInt(value: unknown, fallback: number): number {
   return floored;
 }
 
+function resolveShortTermRecallEvictionOptions(
+  options?: Partial<ShortTermRecallEvictionOptions>,
+): ShortTermRecallEvictionOptions {
+  return {
+    maxEntries: Math.max(
+      1,
+      toFiniteNonNegativeInt(options?.maxEntries, DEFAULT_SHORT_TERM_RECALL_MAX_ENTRIES),
+    ),
+    ttlDays: toFiniteNonNegativeInt(options?.ttlDays, DEFAULT_SHORT_TERM_RECALL_TTL_DAYS),
+    minRecallCount: toFiniteNonNegativeInt(
+      options?.minRecallCount,
+      DEFAULT_SHORT_TERM_RECALL_MIN_RECALL_COUNT,
+    ),
+  };
+}
+
+function toEpochMs(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function evictRecallEntries(
+  entries: Record<string, ShortTermRecallEntry>,
+  options: ShortTermRecallEvictionOptions,
+  nowMs: number,
+): Record<string, ShortTermRecallEntry> {
+  const values = Object.values(entries);
+  if (values.length === 0) {
+    return entries;
+  }
+
+  const ttlCutoffMs = nowMs - options.ttlDays * DAY_MS;
+  const ttlFiltered = values.filter((entry) => {
+    const recallCount = Math.max(0, Math.floor(entry.recallCount ?? 0));
+    const lastRecalledAtMs = toEpochMs(entry.lastRecalledAt);
+    const isStale = Number.isFinite(lastRecalledAtMs) && lastRecalledAtMs < ttlCutoffMs;
+    return !(isStale && recallCount < options.minRecallCount);
+  });
+
+  if (ttlFiltered.length <= options.maxEntries) {
+    return Object.fromEntries(ttlFiltered.map((entry) => [entry.key, entry]));
+  }
+
+  const kept = ttlFiltered
+    .toSorted((left, right) => {
+      if (left.totalScore !== right.totalScore) {
+        return right.totalScore - left.totalScore;
+      }
+      const rightMs = toEpochMs(right.lastRecalledAt);
+      const leftMs = toEpochMs(left.lastRecalledAt);
+      if (Number.isFinite(rightMs) && Number.isFinite(leftMs) && rightMs !== leftMs) {
+        return rightMs - leftMs;
+      }
+      return left.key.localeCompare(right.key);
+    })
+    .slice(0, options.maxEntries);
+  return Object.fromEntries(kept.map((entry) => [entry.key, entry]));
+}
+
 function normalizeWeights(weights?: Partial<PromotionWeights>): PromotionWeights {
   const merged = {
     ...DEFAULT_PROMOTION_WEIGHTS,
@@ -916,6 +984,7 @@ export async function recordShortTermRecalls(params: {
   dayBucket?: string;
   nowMs?: number;
   timezone?: string;
+  recallStoreEviction?: Partial<ShortTermRecallEvictionOptions>;
 }): Promise<void> {
   const workspaceDir = params.workspaceDir?.trim();
   if (!workspaceDir) {
@@ -1003,6 +1072,11 @@ export async function recordShortTermRecalls(params: {
       };
     }
 
+    store.entries = evictRecallEntries(
+      store.entries,
+      resolveShortTermRecallEvictionOptions(params.recallStoreEviction),
+      nowMs,
+    );
     store.updatedAt = nowIso;
     await writeStore(workspaceDir, store);
     await appendMemoryHostEvent(workspaceDir, {
@@ -1985,6 +2059,8 @@ export const __testing = {
   calculateConsolidationComponent,
   calculatePhaseSignalBoost,
   buildClaimHash,
+  evictRecallEntries,
+  resolveShortTermRecallEvictionOptions,
   totalSignalCountForEntry,
   isContaminatedDreamingSnippet,
 };

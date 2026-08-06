@@ -13,6 +13,8 @@ import {
 import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-core-host-runtime-files";
 import {
   formatMemoryDreamingDay,
+  resolveMemoryCorePluginConfig,
+  resolveMemoryDeepDreamingConfig,
   resolveMemoryDreamingWorkspaces,
   resolveMemoryLightDreamingConfig,
   resolveMemoryRemDreamingConfig,
@@ -140,6 +142,21 @@ function resolveWorkspaces(params: {
 
 function calculateLookbackCutoffMs(nowMs: number, lookbackDays: number): number {
   return nowMs - Math.max(0, lookbackDays) * 24 * 60 * 60 * 1000;
+}
+
+function resolveRecallStoreEvictionFromCfg(cfg?: DreamingHostConfig): {
+  maxEntries: number;
+  ttlDays: number;
+  minRecallCount: number;
+} | null {
+  if (!cfg || typeof cfg !== "object") {
+    return null;
+  }
+  const typedCfg = cfg as Parameters<typeof resolveMemoryDeepDreamingConfig>[0]["cfg"];
+  return resolveMemoryDeepDreamingConfig({
+    pluginConfig: resolveMemoryCorePluginConfig(typedCfg),
+    cfg: typedCfg,
+  }).recall;
 }
 
 function isDayWithinLookback(day: string, cutoffMs: number): boolean {
@@ -1029,6 +1046,7 @@ async function ingestSessionTranscriptSignals(params: {
   nowMs: number;
   timezone?: string;
 }): Promise<void> {
+  const recallStoreEviction = resolveRecallStoreEvictionFromCfg(params.cfg) ?? undefined;
   const state = await readSessionIngestionState(params.workspaceDir);
   const collected = await collectSessionIngestionBatches({
     workspaceDir: params.workspaceDir,
@@ -1050,6 +1068,7 @@ async function ingestSessionTranscriptSignals(params: {
       dayBucket: ingestionDayBucket,
       nowMs: params.nowMs,
       timezone: params.timezone,
+      recallStoreEviction,
     });
   }
   if (collected.changed) {
@@ -1195,11 +1214,13 @@ async function collectDailyIngestionBatches(params: {
 
 async function ingestDailyMemorySignals(params: {
   workspaceDir: string;
+  cfg?: DreamingHostConfig;
   lookbackDays: number;
   limit: number;
   nowMs: number;
   timezone?: string;
 }): Promise<void> {
+  const recallStoreEviction = resolveRecallStoreEvictionFromCfg(params.cfg) ?? undefined;
   const state = await readDailyIngestionState(params.workspaceDir);
   const ingestionDayBucket = formatMemoryDreamingDay(params.nowMs, params.timezone);
   const collected = await collectDailyIngestionBatches({
@@ -1220,6 +1241,7 @@ async function ingestDailyMemorySignals(params: {
       dayBucket: ingestionDayBucket,
       nowMs: params.nowMs,
       timezone: params.timezone,
+      recallStoreEviction,
     });
   }
   if (collected.changed) {
@@ -1563,6 +1585,7 @@ async function runLightDreaming(params: {
   const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();
   await ingestDailyMemorySignals({
     workspaceDir: params.workspaceDir,
+    cfg: params.cfg,
     lookbackDays: params.config.lookbackDays,
     limit: params.config.limit,
     nowMs,
@@ -1662,6 +1685,7 @@ async function runRemDreaming(params: {
   const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();
   await ingestDailyMemorySignals({
     workspaceDir: params.workspaceDir,
+    cfg: params.cfg,
     lookbackDays: params.config.lookbackDays,
     limit: params.config.limit,
     nowMs,
