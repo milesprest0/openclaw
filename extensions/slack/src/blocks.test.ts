@@ -53,6 +53,12 @@ describe("parseSlackBlocksInput", () => {
     expect(parsed).toEqual([{ type: "section", text: { type: "mrkdwn", text: "hi" } }]);
   });
 
+  it("accepts an empty blocks array (IMP-029: treated as no-op)", () => {
+    // IMP-029: an empty `blocks` array is a valid "no Block Kit payload" signal;
+    // callers that default blocks to [] should not have to special-case it.
+    expect(parseSlackBlocksInput([])).toEqual([]);
+  });
+
   it("rejects invalid block payloads", () => {
     const cases = [
       {
@@ -64,11 +70,6 @@ describe("parseSlackBlocksInput", () => {
         name: "non-array payload",
         input: { type: "divider" },
         expectedMessage: /must be an array/i,
-      },
-      {
-        name: "empty array",
-        input: [],
-        expectedMessage: /at least one block/i,
       },
       {
         name: "non-object block",

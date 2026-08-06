@@ -15,7 +15,13 @@ function assertBlocksArray(raw: unknown) {
     throw new Error("blocks must be an array");
   }
   if (raw.length === 0) {
-    throw new Error("blocks must contain at least one block");
+    // IMP-029: an empty `blocks` array is a valid "no Block Kit payload"
+    // signal from callers that default `blocks` to `[]` (e.g. tool harnesses).
+    // The upstream behavior of throwing here forced callers to special-case
+    // empty arrays; instead treat them as equivalent to `undefined` and let
+    // the outbound adapter fall back to plain text. Matches the previously
+    // runtime-patched behavior of the installed bundle.
+    return;
   }
   if (raw.length > SLACK_MAX_BLOCKS) {
     throw new Error(`blocks cannot exceed ${SLACK_MAX_BLOCKS} items`);
