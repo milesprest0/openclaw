@@ -4,10 +4,7 @@
  * Barrel export for the Events API dark-launch endpoint (PRE-172 Phase 1).
  * See `endpoint.ts` for handler, `signature.ts` for request verification.
  */
-export {
-  EVENTS_API_DEFAULT_PATH,
-  handleSlackEventsApiRequest,
-} from "./endpoint.js";
+export { EVENTS_API_DEFAULT_PATH, handleSlackEventsApiRequest } from "./endpoint.js";
 export type {
   SlackEventsApiConfig,
   SlackEventsApiLogger,
@@ -19,6 +16,11 @@ export {
   computeSlackSignatureForTest,
   verifySlackSignature,
 } from "./signature.js";
+export { createSlackEventsApiNodeHandler } from "./node-adapter.js";
+export type {
+  CreateSlackEventsApiNodeHandlerOptions,
+  SlackEventsApiNodeHandler,
+} from "./node-adapter.js";
 export type {
   SlackSignatureHeaders,
   VerifySlackSignatureInput,
